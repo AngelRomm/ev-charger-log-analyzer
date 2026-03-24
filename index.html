@@ -548,16 +548,50 @@ function analyzeLog(rows) {
       console.warn(`[Row ${idx}] Error al parsear Mensaje:`, parseErr.message, '| Valor:', msgStr?.toString().substring(0, 100));
       return;
     }
-    const elements = payload?.data?.elements;
-    if (!Array.isArray(elements)) return;
+    // Diagnostic logs for first modulator row
+    if (processedCount === 1) {
+      console.log('[EV Analyzer] Payload completo primera fila modulator:', JSON.stringify(payload, null, 2).substring(0, 2000));
+      console.log('[EV Analyzer] payload.data keys:', payload?.data ? Object.keys(payload.data) : 'NO data');
+      const _elemDiag = payload?.data?.elements;
+      console.log('[EV Analyzer] elements:', _elemDiag, '| Array?', Array.isArray(_elemDiag));
+    }
+
+    // Buscar el array de elementos/conectores en data
+    let elements = null;
+
+    if (Array.isArray(payload?.data?.elements)) {
+      elements = payload.data.elements;
+    } else if (Array.isArray(payload?.data?.connectors)) {
+      elements = payload.data.connectors;
+    } else if (Array.isArray(payload?.data?.slots)) {
+      elements = payload.data.slots;
+    } else if (payload?.data) {
+      // Buscar cualquier array dentro de data
+      const arrayKey = Object.keys(payload.data).find(k => Array.isArray(payload.data[k]) && payload.data[k].length > 0 && payload.data[k][0]?.state !== undefined);
+      if (arrayKey) elements = payload.data[arrayKey];
+    }
+
+    if (!Array.isArray(elements) || elements.length === 0) {
+      console.warn(`[Row ${idx}] No se encontró array de conectores en payload.data. Keys disponibles:`, payload?.data ? Object.keys(payload.data) : 'sin data');
+      return;
+    }
 
     elements.forEach(el => {
       const connId   = Number(el.connectorId);
       const connName = el.connectorName || `Conector ${connId}`;
-      const state    = Number(el.state);
+
+      // Handle state as number or string
+      let state = el.state;
+      if (typeof state === 'string') {
+        const found = Object.entries(STATE_NAMES).find(([k, v]) => v.toLowerCase() === state.toLowerCase());
+        state = found ? Number(found[0]) : NaN;
+      }
+      state = Number(state);
+      if (isNaN(state)) return;
+
       const active   = Number(el.now?.active ?? 0);
 
-      if (el.state === undefined || el.state === null || isNaN(state)) return;
+      if (el.state === undefined || el.state === null) return;
 
       const connKey = `${chargerId}:${connId}`;
       connectorIds.add(connKey);
@@ -694,6 +728,8 @@ function analyzeLog(rows) {
       });
     }
   });
+
+  console.log(`[EV Analyzer] Análisis completado: ${processedCount} mensajes procesados, ${connectorIds.size} conectores, ${anomalies.length} anomalías, ${sessions.length} sesiones`);
 
   return {
     chargerIds: [...chargerIds],
