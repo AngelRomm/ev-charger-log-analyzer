@@ -464,6 +464,8 @@ function processFile(file) {
         return;
       }
       setProgress(80, 'Generando informe…');
+      console.log('[EV Analyzer] Llamando renderReport con:', result.processedCount, 'mensajes,', result.anomalies.length, 'anomalías,', result.sessions.length, 'sesiones');
+      document.getElementById('report').style.display = 'block';
       renderReport(result);
       setProgress(100, 'Listo');
       setTimeout(() => { document.getElementById('progress-wrap').style.display = 'none'; }, 600);
@@ -589,7 +591,8 @@ function analyzeLog(rows) {
       state = Number(state);
       if (el.state === undefined || el.state === null || isNaN(state)) return;
 
-      const active   = Number(el.now?.active ?? 0);
+      const active      = Number(el.now?.active ?? 0);
+      const chargeEnergy = (el.chargeEnergy != null) ? Number(el.chargeEnergy) : null;
 
       const connKey = `${chargerId}:${connId}`;
       connectorIds.add(connKey);
@@ -600,12 +603,18 @@ function analyzeLog(rows) {
 
       // ── State machine ──
       if (!connectorState[connKey]) {
+        // Heuristic: if active > 10000, assume it's mWh accumulated → divisor = 1000 to get Wh
+        // Otherwise assume it's already in Wh → divisor = 1
+        const activeDivisor = active > 10000 ? 1000 : 1;
         connectorState[connKey] = {
           lastState: state, lastTs: ts,
           inCharging: false, chargingStart: null, chargingEnergy: 0,
           chargingLastActive: 0, sessionAnomalous: false,
           charger: chargerId, connName, connId,
-          sessionStartTs: null
+          sessionStartTs: null,
+          lastActive: active,
+          _activeDivisor: activeDivisor,
+          lastChargeEnergy: null
         };
         // Begin charging session if already in charging state
         if (CHARGING_STATES.has(state)) {
@@ -661,12 +670,21 @@ function analyzeLog(rows) {
       const wasCharging = CHARGING_STATES.has(prevState);
       const isCharging  = CHARGING_STATES.has(state);
 
-      // Accumulate energy during charging (cap delta at 5 minutes to guard against log gaps)
+      // Accumulate energy during charging using delta of now.active (accumulated energy field)
       if (cs.inCharging && isCharging) {
-        const MAX_DELTA_SEC = 300;
-        const dtSec = (ts != null && cs.lastTs != null) ? Math.min((ts - cs.lastTs) / 1000, MAX_DELTA_SEC) : 0;
-        cs.chargingEnergy += active * (dtSec / 3600); // Wh
+        if (cs.lastActive !== undefined && cs.lastActive !== null && active > 0) {
+          const deltaActive = active - cs.lastActive;
+          // Only accumulate if delta is positive and reasonable (< 100 kWh per step)
+          if (deltaActive > 0 && deltaActive < 100_000_000) { // sanity cap: 100 MWh per step guards against corrupted readings
+            cs.chargingEnergy += deltaActive / (cs._activeDivisor || 1);
+          }
+        }
       }
+      // Track last chargeEnergy reported by device (more reliable for session energy)
+      if (chargeEnergy !== null && chargeEnergy > 0) {
+        cs.lastChargeEnergy = chargeEnergy;
+      }
+      cs.lastActive = active;
 
       // Session start
       if (!wasCharging && isCharging) {
@@ -675,6 +693,8 @@ function analyzeLog(rows) {
         cs.sessionStartTs = ts;
         cs.chargingEnergy = 0;
         cs.chargingLastActive = active;
+        cs.lastActive = active;
+        cs.lastChargeEnergy = null;
         cs.sessionAnomalous = false;
       }
 
@@ -697,11 +717,14 @@ function analyzeLog(rows) {
           });
         }
 
+        const sessionEnergy = (cs.lastChargeEnergy != null && cs.lastChargeEnergy > 0)
+          ? cs.lastChargeEnergy
+          : Math.round(cs.chargingEnergy);
         sessions.push({
           charger: chargerId, connector: connName,
           start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
           end: ts, endLabel: tsToLabel(ts),
-          durationSec: durSec, energy: Math.round(cs.chargingEnergy),
+          durationSec: durSec, energy: sessionEnergy,
           anomalous
         });
         cs.chargingStart = null;
@@ -716,18 +739,31 @@ function analyzeLog(rows) {
   // Close any open sessions at end of log
   Object.values(connectorState).forEach(cs => {
     if (cs.inCharging && cs.chargingStart) {
+      const sessionEnergy = (cs.lastChargeEnergy != null && cs.lastChargeEnergy > 0)
+        ? cs.lastChargeEnergy
+        : Math.round(cs.chargingEnergy);
       sessions.push({
         charger: cs.charger, connector: cs.connName,
         start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
         end: maxTs, endLabel: tsToLabel(maxTs),
         durationSec: (maxTs - cs.chargingStart) / 1000,
-        energy: Math.round(cs.chargingEnergy),
+        energy: sessionEnergy,
         anomalous: cs.sessionAnomalous
       });
     }
   });
 
   console.log(`[EV Analyzer] Análisis completado: ${processedCount} mensajes procesados, ${connectorIds.size} conectores, ${anomalies.length} anomalías, ${sessions.length} sesiones`);
+  // Diagnostic: per-connector state summary
+  Object.entries(connectorState).forEach(([key, cs]) => {
+    console.log(`[EV Analyzer] Conector ${key}: último estado = ${STATE_NAMES[cs.lastState] ?? cs.lastState}, inCharging = ${cs.inCharging}, energía = ${Math.round(cs.chargingEnergy)} Wh, lastChargeEnergy = ${cs.lastChargeEnergy}`);
+  });
+  // Diagnostic: timeline state distribution
+  Object.entries(timelineData).forEach(([key, points]) => {
+    const stateCounts = {};
+    points.forEach(p => { stateCounts[p.state] = (stateCounts[p.state] || 0) + 1; });
+    console.log(`[EV Analyzer] Timeline ${key}: ${points.length} puntos, estados vistos:`, stateCounts);
+  });
 
   return {
     chargerIds: [...chargerIds],
@@ -787,8 +823,8 @@ function renderReport(result) {
   anomalyData = result.anomalies;
   sessionData = result.sessions;
 
-  // Show report
-  document.getElementById('report').style.display = '';
+  // Show report (display set to 'block' before calling renderReport, kept here for direct calls)
+  document.getElementById('report').style.display = 'block';
 
   // 1. Header
   const metaGrid = document.getElementById('report-meta-grid');
@@ -812,10 +848,13 @@ function renderReport(result) {
   const shortSessionCount = result.anomalies.filter(a => a.type === 'SESION_CORTA').length;
   const warns             = result.anomalies.filter(a => a.type === 'ADVERTENCIA').length;
   const cardsData = [
-    { value: critical,          label: 'Errores críticos',       cls: 'danger'  },
-    { value: invalid,           label: 'Transiciones inválidas', cls: 'warning' },
-    { value: shortSessionCount, label: 'Sesiones cortas',        cls: 'info'    },
-    { value: warns,             label: 'Advertencias',           cls: 'success' }
+    { value: result.processedCount,     label: 'Mensajes procesados',   cls: 'info'    },
+    { value: result.connectorIds.length, label: 'Conectores',           cls: 'info'    },
+    { value: result.sessions.length,    label: 'Sesiones detectadas',   cls: 'success' },
+    { value: critical,                  label: 'Errores críticos',      cls: 'danger'  },
+    { value: invalid,                   label: 'Trans. inválidas',      cls: 'warning' },
+    { value: shortSessionCount,         label: 'Sesiones cortas',       cls: 'info'    },
+    { value: warns,                     label: 'Advertencias',          cls: 'success' }
   ];
   const cardsEl = document.getElementById('summary-cards');
   cardsEl.innerHTML = '';
