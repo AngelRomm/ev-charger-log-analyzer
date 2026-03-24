@@ -567,7 +567,7 @@ function analyzeLog(rows) {
       elements = payload.data.slots;
     } else if (payload?.data) {
       // Buscar cualquier array dentro de data
-      const arrayKey = Object.keys(payload.data).find(k => Array.isArray(payload.data[k]) && payload.data[k].length > 0 && payload.data[k][0]?.state !== undefined);
+      const arrayKey = Object.keys(payload.data).find(k => { const v = payload.data[k]; return Array.isArray(v) && v.length > 0 && v[0]?.state !== undefined; });
       if (arrayKey) elements = payload.data[arrayKey];
     }
 
@@ -587,11 +587,9 @@ function analyzeLog(rows) {
         state = found ? Number(found[0]) : NaN;
       }
       state = Number(state);
-      if (isNaN(state)) return;
+      if (el.state === undefined || el.state === null || isNaN(state)) return;
 
       const active   = Number(el.now?.active ?? 0);
-
-      if (el.state === undefined || el.state === null) return;
 
       const connKey = `${chargerId}:${connId}`;
       connectorIds.add(connKey);
