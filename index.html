@@ -377,23 +377,26 @@
       </div>
     </div>
 
-    <!-- 6. Boot / Init events table -->
-    <div class="table-section">
+    <!-- 6. Boot/reset events table -->
+    <div class="table-section" id="boot-events-section" style="display:none">
       <div class="section-title">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        Eventos de Arranque / Boot
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Eventos de Arranque / Reset (init_boot/sys)
       </div>
       <div class="table-wrap">
-        <table id="boot-events-table">
+        <table id="boot-table">
           <thead>
             <tr>
-              <th>Fecha/Hora</th>
-              <th>Cargador</th>
-              <th>rst_reason</th>
-              <th>Severidad</th>
+              <th data-col="ts">Fecha/Hora <span class="sort-icon">↕</span></th>
+              <th data-col="charger">Cargador <span class="sort-icon">↕</span></th>
+              <th data-col="deviceId">ID dispositivo <span class="sort-icon">↕</span></th>
+              <th data-col="cmd">Tipo cmd <span class="sort-icon">↕</span></th>
+              <th data-col="rstReason">rst_reason <span class="sort-icon">↕</span></th>
+              <th data-col="rstLabel">Motivo del reset <span class="sort-icon">↕</span></th>
+              <th data-col="severity">Severidad <span class="sort-icon">↕</span></th>
             </tr>
           </thead>
-          <tbody id="boot-events-tbody"></tbody>
+          <tbody id="boot-tbody"></tbody>
         </table>
       </div>
     </div>
@@ -864,14 +867,19 @@ function analyzeLog(rows) {
 
   // ── BOOT / INIT EVENT DETECTION ──────────────────────────────
   const bootEvents = [];
+  let graveResetCount = 0;
   rows.forEach((row, idx) => {
-    const topic = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
-    const topicLower = topic.toLowerCase();
-    if (!topicLower.includes('init') && !topicLower.includes('boot')) return;
-
-    const chargerId = extractChargerId(topic);
+    const topic  = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
     const fechaHora = getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') ?? '';
-    const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
+    const msgStr = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
+
+    if (!topic.toLowerCase().includes('init_boot/sys') && !topic.toLowerCase().includes('init_boot')) return;
+
+    // Extract charger ID (EVVC segment)
+    const topicParts = topic.split('/');
+    const chargerId = topicParts.find(p => p.startsWith('EVVC')) || topicParts[2] || 'Desconocido';
+    const deviceId  = topicParts[2] || '—';
+    const cmd       = topicParts[3] || '—';
 
     let payload = null;
     try {
@@ -885,20 +893,31 @@ function analyzeLog(rows) {
       }
     } catch { payload = null; }
 
-    let rstReason = undefined;
-    if (payload) {
-      if (payload.rst_reason !== undefined)        rstReason = payload.rst_reason;
-      else if (payload.data?.rst_reason !== undefined)   rstReason = payload.data.rst_reason;
-      else if (payload.header?.rst_reason !== undefined) rstReason = payload.header.rst_reason;
-    }
+    const rstReason =
+      payload?.rst_reason ??
+      payload?.data?.rst_reason ??
+      payload?.header?.rst_reason ??
+      null;
 
-    const isEmpty = rstReason === undefined || rstReason === null || rstReason === '' || rstReason === 0;
+    const rstVerbose =
+      payload?.rst_reason_verbose ??
+      payload?.data?.rst_reason_verbose ??
+      payload?.header?.rst_reason_verbose ??
+      null;
+
+    const { label: rstLabel, severity, badgeCls } = classifyRstReason(rstReason, rstVerbose);
+    if (severity === 'Grave') graveResetCount++;
+
     bootEvents.push({
       ts: fechaHora,
       tsRaw: parseTimestamp(fechaHora),
-      chargerId,
-      rstReason,
-      severity: isEmpty ? 'connectivity' : 'grave'
+      charger: chargerId,
+      deviceId,
+      cmd,
+      rstReason: rstReason ?? '—',
+      rstLabel,
+      severity,
+      badgeCls
     });
   });
 
@@ -942,6 +961,7 @@ function analyzeLog(rows) {
     anomalies,
     sessions,
     bootEvents,
+    graveResetCount,
     connectivityGaps,
     timelineData,
     connectorState
@@ -949,6 +969,26 @@ function analyzeLog(rows) {
 }
 
 // ── HELPERS ────────────────────────────────────────────────────
+function classifyRstReason(value, verbose) {
+  if (verbose) return { label: verbose, severity: 'Grave', badgeCls: 'badge-danger' };
+  const RST_MAP = {
+    0:  { label: 'Arranque normal',                    severity: 'Normal', badgeCls: 'badge-muted'   },
+    1:  { label: 'Warm reset SW',                      severity: 'Leve',   badgeCls: 'badge-info'    },
+    2:  { label: 'Reset por excepción',                severity: 'Grave',  badgeCls: 'badge-danger'  },
+    3:  { label: 'Reset por watchdog',                 severity: 'Grave',  badgeCls: 'badge-danger'  },
+    4:  { label: 'Reset por fallo en deep sleep',      severity: 'Leve',   badgeCls: 'badge-warning' },
+    5:  { label: 'Reset brownout (bajada de tensión)', severity: 'Grave',  badgeCls: 'badge-danger'  },
+    6:  { label: 'Reset por SDIO',                     severity: 'Leve',   badgeCls: 'badge-warning' },
+    7:  { label: 'Reset por alarma de deepsleep',      severity: 'Normal', badgeCls: 'badge-muted'   },
+  };
+  const v = value;
+  if (v === undefined || v === null || v === '' || v === 0) return RST_MAP[0];
+  const n = Number(v);
+  if (!isNaN(n) && RST_MAP[n]) return RST_MAP[n];
+  if (!isNaN(n)) return { label: `rst_reason=${n}`, severity: 'Grave', badgeCls: 'badge-danger' };
+  return { label: String(v), severity: 'Grave', badgeCls: 'badge-danger' };
+}
+
 function extractChargerId(topic) {
   const parts = topic.split('/');
   return parts.find(p => p.startsWith('EVVC')) || 'Desconocido';
@@ -1020,18 +1060,17 @@ function renderReport(result) {
   const invalid           = result.anomalies.filter(a => a.type === 'TRANSICION_INVALIDA').length;
   const shortSessionCount = result.anomalies.filter(a => a.type === 'SESION_CORTA').length;
   const warns             = result.anomalies.filter(a => a.type === 'ADVERTENCIA').length;
-  const bootGraves        = bootEventData.filter(b => b.severity === 'grave').length;
   const gapCount          = gapData.length;
   const cardsData = [
-    { value: result.processedCount,     label: 'Mensajes procesados',   cls: 'info'    },
+    { value: result.processedCount,      label: 'Mensajes procesados',  cls: 'info'    },
     { value: result.connectorIds.length, label: 'Conectores',           cls: 'info'    },
-    { value: result.sessions.length,    label: 'Sesiones detectadas',   cls: 'success' },
-    { value: critical,                  label: 'Errores críticos',      cls: 'danger'  },
-    { value: invalid,                   label: 'Trans. inválidas',      cls: 'warning' },
-    { value: shortSessionCount,         label: 'Sesiones cortas',       cls: 'info'    },
-    { value: warns,                     label: 'Advertencias',          cls: 'success' },
-    { value: bootGraves,                label: 'Boot resets graves',    cls: 'warning' },
-    { value: gapCount,                  label: 'Gaps de conectividad',  cls: 'info'    }
+    { value: result.sessions.length,     label: 'Sesiones detectadas',  cls: 'success' },
+    { value: critical,                   label: 'Errores críticos',     cls: 'danger'  },
+    { value: invalid,                    label: 'Trans. inválidas',     cls: 'warning' },
+    { value: shortSessionCount,          label: 'Sesiones cortas',      cls: 'info'    },
+    { value: warns,                      label: 'Advertencias',         cls: 'success' },
+    { value: result.graveResetCount || 0, label: 'Resets graves',      cls: 'danger'  },
+    { value: gapCount,                   label: 'Gaps de conectividad', cls: 'info'    }
   ];
   const cardsEl = document.getElementById('summary-cards');
   cardsEl.innerHTML = '';
@@ -1055,7 +1094,9 @@ function renderReport(result) {
   renderSessionsTable();
 
   // 6. Boot events table
-  renderBootEventsTable();
+  renderBootEventsTable(result.bootEvents || []);
+  document.getElementById('boot-events-section').style.display =
+    (result.bootEvents && result.bootEvents.length > 0) ? '' : 'none';
 
   // 7. Gaps table
   renderGapsTable();
@@ -1325,27 +1366,52 @@ function renderSessionsTable() {
 }
 
 // ── BOOT EVENTS TABLE ─────────────────────────────────────────
-function renderBootEventsTable() {
-  const tbody = document.getElementById('boot-events-tbody');
+let bootSortCol = 'ts';
+let bootSortDir = 1;
+
+function renderBootEventsTable(bootEvents) {
+  const tbody = document.getElementById('boot-tbody');
   tbody.innerHTML = '';
 
-  if (bootEventData.length === 0) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No se detectaron eventos de arranque / boot.</td></tr>';
+  if (!bootEvents || bootEvents.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No se detectaron eventos de arranque/reset en este fichero.</td></tr>';
     return;
   }
 
-  bootEventData.forEach(ev => {
-    const rstDisplay = (ev.rstReason === undefined || ev.rstReason === null || ev.rstReason === '') ? '—' : escHtml(String(ev.rstReason));
-    const badgeCls   = ev.severity === 'grave' ? 'badge-danger' : 'badge-muted';
-    const badgeLabel = ev.severity === 'grave' ? 'Reset grave' : 'Pérdida de conectividad';
+  let data = [...bootEvents];
+  data.sort((a, b) => {
+    let va = a[bootSortCol] ?? '';
+    let vb = b[bootSortCol] ?? '';
+    if (bootSortCol === 'ts') { va = a.tsRaw || 0; vb = b.tsRaw || 0; }
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    return va < vb ? -bootSortDir : va > vb ? bootSortDir : 0;
+  });
+
+  data.forEach(e => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${escHtml(ev.ts)}</td>
-      <td>${escHtml(ev.chargerId)}</td>
-      <td>${rstDisplay}</td>
-      <td><span class="badge ${badgeCls}">${badgeLabel}</span></td>
+      <td>${escHtml(e.ts)}</td>
+      <td>${escHtml(e.charger)}</td>
+      <td>${escHtml(e.deviceId)}</td>
+      <td>${escHtml(e.cmd)}</td>
+      <td>${escHtml(String(e.rstReason))}</td>
+      <td><span class="badge ${e.badgeCls}">${escHtml(e.rstLabel)}</span></td>
+      <td><span class="badge ${e.badgeCls}">${escHtml(e.severity)}</span></td>
     `;
     tbody.appendChild(tr);
+  });
+
+  // Setup sorting (reassigning onclick replaces any previous handler)
+  document.querySelectorAll('#boot-table thead th[data-col]').forEach(th => {
+    th.onclick = () => {
+      const col = th.dataset.col;
+      if (bootSortCol === col) bootSortDir *= -1;
+      else { bootSortCol = col; bootSortDir = 1; }
+      document.querySelectorAll('#boot-table thead th .sort-icon').forEach(s => s.textContent = '↕');
+      th.querySelector('.sort-icon').textContent = bootSortDir === 1 ? '↑' : '↓';
+      renderBootEventsTable(bootEvents);
+    };
   });
 }
 
