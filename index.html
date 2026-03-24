@@ -921,7 +921,7 @@ function analyzeLog(rows) {
     points.sort((a, b) => a.ts - b.ts);
     for (let i = 1; i < points.length; i++) {
       const durationSec = (points[i].ts - points[i - 1].ts) / 1000;
-      if (durationSec > 300) {
+      if (durationSec > GAP_THRESHOLD_SECONDS) {
         connectivityGaps.push({
           chargerId,
           gapStart: points[i - 1].ts,
@@ -1147,14 +1147,14 @@ function renderTimelines(result) {
               title: items => {
                 const dsIdx = items[0].datasetIndex;
                 const idx   = items[0].dataIndex;
-                if (dsIdx === 0) return floatData[idx]?.label || '';
-                return gapFloatData[idx]?.label || 'Gap de conectividad';
+                if (dsIdx === 0) return (idx < floatData.length ? floatData[idx]?.label : null) || '';
+                return (idx < gapFloatData.length ? gapFloatData[idx]?.label : null) || 'Gap de conectividad';
               },
               label: items => {
                 const dsIdx = items.datasetIndex;
                 const idx   = items.dataIndex;
                 if (dsIdx === 0) {
-                  const state = floatData[idx]?.state;
+                  const state = idx < floatData.length ? floatData[idx]?.state : undefined;
                   return `Estado: ${STATE_NAMES[state] ?? state}`;
                 }
                 return 'Pérdida de conectividad';
@@ -1381,11 +1381,12 @@ function exportReport() {
 const HISTORY_KEY = 'ev-analyzer-history';
 const HISTORY_MAX = 10;
 const HISTORY_SIZE_LIMIT = 4 * 1024 * 1024; // 4 MB
+const GAP_THRESHOLD_SECONDS = 300; // 5 minutes
 
 function saveToHistory(result, fileName) {
   try {
     const entry = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 9)),
       analyzedAt: new Date().toISOString(),
       fileName: fileName || '—',
       chargerIds: result.chargerIds,
@@ -1405,13 +1406,12 @@ function saveToHistory(result, fileName) {
     if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX);
 
     // Enforce size limit: drop oldest entries until under limit
-    let serialized;
-    while (history.length > 0) {
-      serialized = JSON.stringify(history);
-      if (serialized.length <= HISTORY_SIZE_LIMIT) break;
+    let serialized = JSON.stringify(history);
+    while (history.length > 0 && serialized.length > HISTORY_SIZE_LIMIT) {
       history.pop();
+      serialized = JSON.stringify(history);
     }
-    if (history.length > 0) localStorage.setItem(HISTORY_KEY, serialized || JSON.stringify(history));
+    if (history.length > 0) localStorage.setItem(HISTORY_KEY, serialized);
   } catch (e) {
     console.warn('[EV Analyzer] No se pudo guardar el historial:', e.message);
   }
