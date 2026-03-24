@@ -187,11 +187,44 @@
     /* ===== EMPTY STATE ===== */
     .empty-row td { text-align: center; color: var(--muted); padding: 28px; font-style: italic; }
 
+    /* ===== GAP ROWS ===== */
+    .gap-row td { border-left: 4px solid var(--warning); }
+
+    /* ===== HISTORY SECTION ===== */
+    #history-section { margin-top: 24px; }
+    .history-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 6px; border-bottom: 2px solid var(--border); }
+    .history-section-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+    .history-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+    .history-card {
+      background: var(--card); border-radius: var(--radius);
+      padding: 18px 20px; box-shadow: var(--shadow);
+      border-left: 4px solid var(--primary);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .history-card-charger { font-weight: 700; font-size: .95rem; color: var(--text); }
+    .history-card-range { font-size: .82rem; color: var(--muted); }
+    .history-card-analyzed { font-size: .78rem; color: var(--muted); font-style: italic; margin-bottom: 2px; }
+    .history-card-counts { display: flex; flex-wrap: wrap; gap: 5px; }
+    .history-card-footer { margin-top: 6px; display: flex; align-items: center; justify-content: space-between; }
+    .btn-view-report {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--primary); color: #fff;
+      border: none; border-radius: 6px; padding: 7px 16px;
+      font-size: .85rem; font-weight: 600; cursor: pointer; transition: background .15s;
+    }
+    .btn-view-report:hover { background: var(--primary-dark); }
+    #btn-clear-history {
+      background: none; border: 1px solid var(--border);
+      color: var(--muted); border-radius: 6px; padding: 6px 14px;
+      font-size: .82rem; cursor: pointer; transition: all .15s;
+    }
+    #btn-clear-history:hover { border-color: var(--danger); color: var(--danger); }
+
     /* ===== PRINT ===== */
     @media print {
       body { background: #fff; font-size: 11pt; }
       header { background: #1e40af !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      #upload-zone, #progress-wrap, #btn-export-wrap, .table-filters, .print-hide { display: none !important; }
+      #upload-zone, #progress-wrap, #btn-export-wrap, .table-filters, .print-hide, #history-section { display: none !important; }
       #report { display: block !important; }
       .card, .table-section, #timeline-section, #report-header { box-shadow: none; border: 1px solid #e2e8f0; break-inside: avoid; }
       table { font-size: 9pt; }
@@ -228,6 +261,18 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       Seleccionar fichero
     </button>
+  </div>
+
+  <!-- History section (shown below upload zone when history exists) -->
+  <div id="history-section" style="display:none;">
+    <div class="history-section-header">
+      <div class="section-title" style="margin-bottom:0;border-bottom:none;padding-bottom:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Últimos análisis
+      </div>
+      <button id="btn-clear-history" type="button">Limpiar historial</button>
+    </div>
+    <div id="history-grid" class="history-grid"></div>
   </div>
 
   <!-- Progress -->
@@ -332,6 +377,48 @@
       </div>
     </div>
 
+    <!-- 6. Boot / Init events table -->
+    <div class="table-section">
+      <div class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Eventos de Arranque / Boot
+      </div>
+      <div class="table-wrap">
+        <table id="boot-events-table">
+          <thead>
+            <tr>
+              <th>Fecha/Hora</th>
+              <th>Cargador</th>
+              <th>rst_reason</th>
+              <th>Severidad</th>
+            </tr>
+          </thead>
+          <tbody id="boot-events-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 7. Connectivity gaps table -->
+    <div class="table-section">
+      <div class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+        Pérdidas de Conectividad
+      </div>
+      <div class="table-wrap">
+        <table id="gaps-table">
+          <thead>
+            <tr>
+              <th>Cargador</th>
+              <th>Inicio del gap</th>
+              <th>Fin del gap</th>
+              <th>Duración</th>
+            </tr>
+          </thead>
+          <tbody id="gaps-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
   </div><!-- #report -->
 </main>
 
@@ -391,6 +478,8 @@ const STATE_COLORS = {
 // ── GLOBALS ────────────────────────────────────────────────────
 let anomalyData = [];
 let sessionData = [];
+let bootEventData = [];
+let gapData = [];
 let timelineChartInstances = [];
 
 // ── DRAG & DROP / FILE INPUT ────────────────────────────────────
@@ -411,6 +500,10 @@ btnSelect.addEventListener('click', e => { e.stopPropagation(); fileInput.click(
 uploadZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
 document.getElementById('btn-new').addEventListener('click', resetUI);
 document.getElementById('btn-export').addEventListener('click', exportReport);
+document.getElementById('btn-clear-history').addEventListener('click', clearHistory);
+
+// Initialize history dashboard on page load
+renderHistoryDashboard();
 
 // ── PROGRESS ───────────────────────────────────────────────────
 function setProgress(pct, label) {
@@ -423,6 +516,7 @@ function processFile(file) {
   document.getElementById('progress-wrap').style.display = 'block';
   setProgress(5, 'Leyendo fichero…');
   uploadZone.style.display = 'none';
+  document.getElementById('history-section').style.display = 'none';
 
   const reader = new FileReader();
   reader.onload = e => {
@@ -451,6 +545,7 @@ function processFile(file) {
       if (result.processedCount === 0) {
         document.getElementById('progress-wrap').style.display = 'none';
         uploadZone.style.display = '';
+        renderHistoryDashboard();
         const colNames = rows.length > 0 ? Object.keys(rows[0]).join(', ') : 'ninguna';
         alert(
           `No se encontraron mensajes del topic "processes/modulator".\n\n` +
@@ -467,11 +562,13 @@ function processFile(file) {
       console.log('[EV Analyzer] Llamando renderReport con:', result.processedCount, 'mensajes,', result.anomalies.length, 'anomalías,', result.sessions.length, 'sesiones');
       document.getElementById('report').style.display = 'block';
       renderReport(result);
+      saveToHistory(result, file.name);
       setProgress(100, 'Listo');
       setTimeout(() => { document.getElementById('progress-wrap').style.display = 'none'; }, 600);
     } catch (err) {
       document.getElementById('progress-wrap').style.display = 'none';
       uploadZone.style.display = '';
+      renderHistoryDashboard();
       alert('Error al procesar el fichero:\n' + err.message);
       console.error(err);
     }
@@ -765,6 +862,78 @@ function analyzeLog(rows) {
     console.log(`[EV Analyzer] Timeline ${key}: ${points.length} puntos, estados vistos:`, stateCounts);
   });
 
+  // ── BOOT / INIT EVENT DETECTION ──────────────────────────────
+  const bootEvents = [];
+  rows.forEach((row, idx) => {
+    const topic = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
+    const topicLower = topic.toLowerCase();
+    if (!topicLower.includes('init') && !topicLower.includes('boot')) return;
+
+    const chargerId = extractChargerId(topic);
+    const fechaHora = getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') ?? '';
+    const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
+
+    let payload = null;
+    try {
+      let raw = msgStr;
+      if (typeof raw === 'object' && raw !== null) {
+        payload = raw;
+      } else {
+        raw = String(raw).trim();
+        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+        try { payload = JSON.parse(raw); } catch { payload = JSON.parse(raw.replace(/\\"/g, '"')); }
+      }
+    } catch { payload = null; }
+
+    let rstReason = undefined;
+    if (payload) {
+      if (payload.rst_reason !== undefined)        rstReason = payload.rst_reason;
+      else if (payload.data?.rst_reason !== undefined)   rstReason = payload.data.rst_reason;
+      else if (payload.header?.rst_reason !== undefined) rstReason = payload.header.rst_reason;
+    }
+
+    const isEmpty = rstReason === undefined || rstReason === null || rstReason === '' || rstReason === 0;
+    bootEvents.push({
+      ts: fechaHora,
+      tsRaw: parseTimestamp(fechaHora),
+      chargerId,
+      rstReason,
+      severity: isEmpty ? 'connectivity' : 'grave'
+    });
+  });
+
+  // ── CONNECTIVITY GAP DETECTION ────────────────────────────────
+  const connectivityGaps = [];
+  // Group all rows by charger ID using all topics
+  const allRowsByCharger = {};
+  rows.forEach(row => {
+    const topic = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
+    if (!topic) return;
+    const chargerId = extractChargerId(topic);
+    if (!chargerId || chargerId === 'Desconocido') return;
+    const fechaHora = getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') ?? '';
+    const ts = parseTimestamp(fechaHora);
+    if (!ts) return;
+    if (!allRowsByCharger[chargerId]) allRowsByCharger[chargerId] = [];
+    allRowsByCharger[chargerId].push({ ts, label: fechaHora });
+  });
+  Object.entries(allRowsByCharger).forEach(([chargerId, points]) => {
+    points.sort((a, b) => a.ts - b.ts);
+    for (let i = 1; i < points.length; i++) {
+      const durationSec = (points[i].ts - points[i - 1].ts) / 1000;
+      if (durationSec > GAP_THRESHOLD_SECONDS) {
+        connectivityGaps.push({
+          chargerId,
+          gapStart: points[i - 1].ts,
+          gapEnd: points[i].ts,
+          gapStartLabel: points[i - 1].label,
+          gapEndLabel: points[i].label,
+          durationSec
+        });
+      }
+    }
+  });
+
   return {
     chargerIds: [...chargerIds],
     connectorIds: [...connectorIds],
@@ -772,6 +941,8 @@ function analyzeLog(rows) {
     minTs, maxTs,
     anomalies,
     sessions,
+    bootEvents,
+    connectivityGaps,
     timelineData,
     connectorState
   };
@@ -820,8 +991,10 @@ function formatDuration(sec) {
 
 // ── RENDER REPORT ──────────────────────────────────────────────
 function renderReport(result) {
-  anomalyData = result.anomalies;
-  sessionData = result.sessions;
+  anomalyData  = result.anomalies;
+  sessionData  = result.sessions;
+  bootEventData = result.bootEvents || [];
+  gapData       = result.connectivityGaps || [];
 
   // Show report (display set to 'block' before calling renderReport, kept here for direct calls)
   document.getElementById('report').style.display = 'block';
@@ -847,6 +1020,8 @@ function renderReport(result) {
   const invalid           = result.anomalies.filter(a => a.type === 'TRANSICION_INVALIDA').length;
   const shortSessionCount = result.anomalies.filter(a => a.type === 'SESION_CORTA').length;
   const warns             = result.anomalies.filter(a => a.type === 'ADVERTENCIA').length;
+  const bootGraves        = bootEventData.filter(b => b.severity === 'grave').length;
+  const gapCount          = gapData.length;
   const cardsData = [
     { value: result.processedCount,     label: 'Mensajes procesados',   cls: 'info'    },
     { value: result.connectorIds.length, label: 'Conectores',           cls: 'info'    },
@@ -854,7 +1029,9 @@ function renderReport(result) {
     { value: critical,                  label: 'Errores críticos',      cls: 'danger'  },
     { value: invalid,                   label: 'Trans. inválidas',      cls: 'warning' },
     { value: shortSessionCount,         label: 'Sesiones cortas',       cls: 'info'    },
-    { value: warns,                     label: 'Advertencias',          cls: 'success' }
+    { value: warns,                     label: 'Advertencias',          cls: 'success' },
+    { value: bootGraves,                label: 'Boot resets graves',    cls: 'warning' },
+    { value: gapCount,                  label: 'Gaps de conectividad',  cls: 'info'    }
   ];
   const cardsEl = document.getElementById('summary-cards');
   cardsEl.innerHTML = '';
@@ -865,7 +1042,7 @@ function renderReport(result) {
     cardsEl.appendChild(div);
   });
 
-  // 3. Timeline
+  // 3. Timeline (pass gaps for overlay)
   renderTimelines(result);
 
   // 4. Anomaly table
@@ -876,6 +1053,12 @@ function renderReport(result) {
 
   // 5. Sessions table
   renderSessionsTable();
+
+  // 6. Boot events table
+  renderBootEventsTable();
+
+  // 7. Gaps table
+  renderGapsTable();
 }
 
 // ── TIMELINE ───────────────────────────────────────────────────
@@ -924,17 +1107,34 @@ function renderTimelines(result) {
       });
     }
 
+    // Gaps for this charger as overlay dataset
+    const chargerForKey = connKey.split(':')[0];
+    const chargerGaps = (result.connectivityGaps || []).filter(g => g.chargerId === chargerForKey);
+    const gapFloatData = chargerGaps.map(g => ({ x: [g.gapStart, g.gapEnd], label: `Gap: ${formatDuration(g.durationSec)}` }));
+
+    const datasets = [
+      {
+        data: floatData.map(d => ({ x: d.x, y: 1 })),
+        backgroundColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
+        borderColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
+        borderWidth: 0,
+        borderRadius: 2
+      }
+    ];
+    if (gapFloatData.length > 0) {
+      datasets.push({
+        data: gapFloatData.map(d => ({ x: d.x, y: 1 })),
+        backgroundColor: 'rgba(239,68,68,0.25)',
+        borderColor: 'rgba(239,68,68,0.5)',
+        borderWidth: 1,
+        borderRadius: 0,
+        _gapData: gapFloatData
+      });
+    }
+
     const chart = new Chart(canvas, {
       type: 'bar',
-      data: {
-        datasets: [{
-          data: floatData.map(d => ({ x: d.x, y: 1 })),
-          backgroundColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
-          borderColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
-          borderWidth: 0,
-          borderRadius: 2
-        }]
-      },
+      data: { datasets },
       options: {
         indexAxis: 'y',
         responsive: true,
@@ -945,13 +1145,19 @@ function renderTimelines(result) {
           tooltip: {
             callbacks: {
               title: items => {
-                const idx = items[0].dataIndex;
-                return floatData[idx]?.label || '';
+                const dsIdx = items[0].datasetIndex;
+                const idx   = items[0].dataIndex;
+                if (dsIdx === 0) return (idx < floatData.length ? floatData[idx]?.label : null) || '';
+                return (idx < gapFloatData.length ? gapFloatData[idx]?.label : null) || 'Gap de conectividad';
               },
               label: items => {
-                const idx = items.dataIndex;
-                const state = floatData[idx]?.state;
-                return `Estado: ${STATE_NAMES[state] ?? state}`;
+                const dsIdx = items.datasetIndex;
+                const idx   = items.dataIndex;
+                if (dsIdx === 0) {
+                  const state = idx < floatData.length ? floatData[idx]?.state : undefined;
+                  return `Estado: ${STATE_NAMES[state] ?? state}`;
+                }
+                return 'Pérdida de conectividad';
               }
             }
           }
@@ -1118,9 +1324,161 @@ function renderSessionsTable() {
   });
 }
 
+// ── BOOT EVENTS TABLE ─────────────────────────────────────────
+function renderBootEventsTable() {
+  const tbody = document.getElementById('boot-events-tbody');
+  tbody.innerHTML = '';
+
+  if (bootEventData.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No se detectaron eventos de arranque / boot.</td></tr>';
+    return;
+  }
+
+  bootEventData.forEach(ev => {
+    const rstDisplay = (ev.rstReason === undefined || ev.rstReason === null || ev.rstReason === '') ? '—' : escHtml(String(ev.rstReason));
+    const badgeCls   = ev.severity === 'grave' ? 'badge-danger' : 'badge-muted';
+    const badgeLabel = ev.severity === 'grave' ? 'Reset grave' : 'Pérdida de conectividad';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escHtml(ev.ts)}</td>
+      <td>${escHtml(ev.chargerId)}</td>
+      <td>${rstDisplay}</td>
+      <td><span class="badge ${badgeCls}">${badgeLabel}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── GAPS TABLE ────────────────────────────────────────────────
+function renderGapsTable() {
+  const tbody = document.getElementById('gaps-tbody');
+  tbody.innerHTML = '';
+
+  if (gapData.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No se detectaron pérdidas de conectividad (&gt;5 min).</td></tr>';
+    return;
+  }
+
+  gapData.forEach(g => {
+    const tr = document.createElement('tr');
+    tr.className = 'gap-row';
+    tr.innerHTML = `
+      <td>${escHtml(g.chargerId)}</td>
+      <td>${escHtml(g.gapStartLabel)}</td>
+      <td>${escHtml(g.gapEndLabel)}</td>
+      <td>${formatDuration(g.durationSec)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
 // ── EXPORT REPORT ──────────────────────────────────────────────
 function exportReport() {
   window.print();
+}
+
+// ── HISTORY MANAGEMENT ─────────────────────────────────────────
+const HISTORY_KEY = 'ev-analyzer-history';
+const HISTORY_MAX = 10;
+const HISTORY_SIZE_LIMIT = 4 * 1024 * 1024; // 4 MB
+const GAP_THRESHOLD_SECONDS = 300; // 5 minutes
+
+function saveToHistory(result, fileName) {
+  try {
+    const entry = {
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 9)),
+      analyzedAt: new Date().toISOString(),
+      fileName: fileName || '—',
+      chargerIds: result.chargerIds,
+      dateRange: result.minTs !== Infinity
+        ? `${tsToLabel(result.minTs)} – ${tsToLabel(result.maxTs)}`
+        : '—',
+      processedCount: result.processedCount,
+      anomalyCount: result.anomalies.length,
+      sessionCount: result.sessions.length,
+      bootEventCount: (result.bootEvents || []).length,
+      gapCount: (result.connectivityGaps || []).length,
+      reportSnapshot: result
+    };
+
+    let history = loadHistory();
+    history.unshift(entry);
+    if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX);
+
+    // Enforce size limit: drop oldest entries until under limit
+    let serialized = JSON.stringify(history);
+    while (history.length > 0 && serialized.length > HISTORY_SIZE_LIMIT) {
+      history.pop();
+      serialized = JSON.stringify(history);
+    }
+    if (history.length > 0) localStorage.setItem(HISTORY_KEY, serialized);
+  } catch (e) {
+    console.warn('[EV Analyzer] No se pudo guardar el historial:', e.message);
+  }
+}
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+function clearHistory() {
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistoryDashboard();
+}
+
+function renderHistoryDashboard() {
+  const section = document.getElementById('history-section');
+  const grid    = document.getElementById('history-grid');
+  const history = loadHistory();
+
+  if (history.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  grid.innerHTML = '';
+
+  history.forEach(entry => {
+    const card = document.createElement('div');
+    card.className = 'history-card';
+
+    const analyzedDate = entry.analyzedAt
+      ? new Date(entry.analyzedAt).toLocaleString('es-ES')
+      : '—';
+
+    card.innerHTML = `
+      <div class="history-card-charger">${escHtml((entry.chargerIds || []).join(', ') || '—')}</div>
+      <div class="history-card-range">📅 ${escHtml(entry.dateRange || '—')}</div>
+      <div class="history-card-analyzed">Analizado: ${escHtml(analyzedDate)}</div>
+      <div class="history-card-counts">
+        <span class="badge badge-info">${entry.processedCount ?? 0} msgs</span>
+        <span class="badge badge-danger">${entry.anomalyCount ?? 0} anomalías</span>
+        <span class="badge badge-success">${entry.sessionCount ?? 0} sesiones</span>
+        <span class="badge badge-warning">${entry.bootEventCount ?? 0} boots</span>
+        <span class="badge badge-muted">${entry.gapCount ?? 0} gaps</span>
+      </div>
+      <div class="history-card-footer">
+        <span style="font-size:.78rem;color:var(--muted);">${escHtml(entry.fileName || '—')}</span>
+        <button class="btn-view-report" type="button">Ver informe</button>
+      </div>
+    `;
+
+    card.querySelector('.btn-view-report').addEventListener('click', () => {
+      if (!entry.reportSnapshot) { alert('No hay instantánea guardada para este análisis.'); return; }
+      document.getElementById('upload-zone').style.display = 'none';
+      document.getElementById('history-section').style.display = 'none';
+      document.getElementById('report').style.display = 'block';
+      renderReport(entry.reportSnapshot);
+    });
+
+    grid.appendChild(card);
+  });
 }
 
 // ── RESET ──────────────────────────────────────────────────────
@@ -1131,8 +1489,11 @@ function resetUI() {
   document.getElementById('file-input').value = '';
   timelineChartInstances.forEach(c => c.destroy());
   timelineChartInstances = [];
-  anomalyData = [];
-  sessionData = [];
+  anomalyData   = [];
+  sessionData   = [];
+  bootEventData = [];
+  gapData       = [];
+  renderHistoryDashboard();
 }
 
 // ── UTILS ──────────────────────────────────────────────────────
