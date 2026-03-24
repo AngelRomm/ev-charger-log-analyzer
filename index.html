@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EV Charger Log Analyzer</title>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* ===== RESET & BASE ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --danger: #dc2626;
+      --warning: #d97706;
+      --success: #16a34a;
+      --info: #0891b2;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+      --radius: 10px;
+      --shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ===== HEADER ===== */
+    header {
+      background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+      color: #fff; padding: 18px 32px; display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 12px rgba(37,99,235,.3);
+    }
+    header svg { flex-shrink: 0; }
+    header h1 { font-size: 1.45rem; font-weight: 700; letter-spacing: -.3px; }
+    header p  { font-size: .85rem; opacity: .8; margin-top: 2px; }
+
+    /* ===== MAIN LAYOUT ===== */
+    main { max-width: 1280px; margin: 0 auto; padding: 32px 20px; }
+
+    /* ===== UPLOAD ZONE ===== */
+    #upload-zone {
+      border: 2.5px dashed var(--primary);
+      border-radius: var(--radius);
+      background: #eff6ff;
+      padding: 56px 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: background .2s, border-color .2s;
+      position: relative;
+    }
+    #upload-zone.drag-over { background: #dbeafe; border-color: var(--primary-dark); }
+    #upload-zone svg { margin-bottom: 14px; color: var(--primary); }
+    #upload-zone h2 { font-size: 1.2rem; color: var(--text); margin-bottom: 6px; }
+    #upload-zone p  { color: var(--muted); font-size: .9rem; }
+    #upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    #btn-select {
+      margin-top: 18px;
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--primary); color: #fff;
+      border: none; border-radius: 6px; padding: 10px 22px;
+      font-size: .95rem; font-weight: 600; cursor: pointer;
+      transition: background .15s;
+      position: relative; z-index: 1;
+    }
+    #btn-select:hover { background: var(--primary-dark); }
+
+    /* ===== PROGRESS ===== */
+    #progress-wrap { display: none; margin-top: 24px; }
+    #progress-bar-outer { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+    #progress-bar { height: 100%; background: var(--primary); width: 0%; transition: width .3s; }
+    #progress-label { font-size: .85rem; color: var(--muted); margin-top: 6px; }
+
+    /* ===== REPORT ===== */
+    #report { display: none; }
+
+    /* Section title */
+    .section-title {
+      font-size: 1.1rem; font-weight: 700; color: var(--text);
+      margin-bottom: 14px; padding-bottom: 6px;
+      border-bottom: 2px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-title svg { flex-shrink: 0; }
+
+    /* ===== REPORT HEADER ===== */
+    #report-header {
+      background: var(--card); border-radius: var(--radius);
+      padding: 24px 28px; box-shadow: var(--shadow);
+      margin-bottom: 24px;
+    }
+    .report-header-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px;
+    }
+    .report-meta { }
+    .report-meta dt { font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .report-meta dd { font-size: 1rem; font-weight: 600; color: var(--text); margin-top: 2px; }
+
+    /* ===== SUMMARY CARDS ===== */
+    #summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap: 16px; margin-bottom: 24px; }
+    .card {
+      background: var(--card); border-radius: var(--radius);
+      padding: 20px 22px; box-shadow: var(--shadow);
+      border-left: 4px solid var(--border);
+    }
+    .card.danger  { border-left-color: var(--danger); }
+    .card.warning { border-left-color: var(--warning); }
+    .card.info    { border-left-color: var(--info); }
+    .card.success { border-left-color: var(--success); }
+    .card-value { font-size: 2rem; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+    .card.danger  .card-value { color: var(--danger); }
+    .card.warning .card-value { color: var(--warning); }
+    .card.info    .card-value { color: var(--info); }
+    .card.success .card-value { color: var(--success); }
+    .card-label { font-size: .82rem; color: var(--muted); font-weight: 500; }
+
+    /* ===== TIMELINE ===== */
+    #timeline-section {
+      background: var(--card); border-radius: var(--radius);
+      padding: 24px 28px; box-shadow: var(--shadow); margin-bottom: 24px;
+      overflow-x: auto;
+    }
+    #timeline-charts { display: flex; flex-direction: column; gap: 32px; }
+    .timeline-connector { }
+    .timeline-connector h3 { font-size: .9rem; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+    .timeline-canvas-wrap { position: relative; height: 110px; width: 100%; min-width: 600px; }
+
+    /* ===== TABLES ===== */
+    .table-section {
+      background: var(--card); border-radius: var(--radius);
+      padding: 24px 28px; box-shadow: var(--shadow); margin-bottom: 24px;
+    }
+    .table-filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; align-items: center; }
+    .table-filters select,
+    .table-filters input {
+      padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: .88rem; color: var(--text); background: var(--bg);
+      outline: none; transition: border-color .15s;
+    }
+    .table-filters select:focus,
+    .table-filters input:focus { border-color: var(--primary); }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    thead th {
+      padding: 10px 12px; background: var(--bg);
+      text-align: left; font-weight: 700;
+      color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .4px;
+      border-bottom: 2px solid var(--border);
+      cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    thead th:hover { color: var(--primary); }
+    thead th .sort-icon { margin-left: 4px; opacity: .5; }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: #f8fafc; }
+    tbody td { padding: 9px 12px; vertical-align: top; }
+    .badge {
+      display: inline-block; padding: 2px 9px; border-radius: 99px;
+      font-size: .75rem; font-weight: 700; white-space: nowrap;
+    }
+    .badge-danger  { background: #fee2e2; color: var(--danger); }
+    .badge-warning { background: #fef3c7; color: var(--warning); }
+    .badge-info    { background: #e0f2fe; color: var(--info); }
+    .badge-success { background: #dcfce7; color: var(--success); }
+    .badge-muted   { background: #f1f5f9; color: var(--muted); }
+    td.anomaly-yes  { color: var(--danger); font-weight: 700; }
+    td.anomaly-no   { color: var(--success); font-weight: 600; }
+
+    /* ===== EXPORT BUTTON ===== */
+    #btn-export-wrap { text-align: right; margin-bottom: 24px; }
+    #btn-export {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--success); color: #fff;
+      border: none; border-radius: 6px; padding: 11px 26px;
+      font-size: .95rem; font-weight: 700; cursor: pointer; transition: background .15s;
+    }
+    #btn-export:hover { background: #15803d; }
+    #btn-new {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--primary); color: #fff;
+      border: none; border-radius: 6px; padding: 11px 26px;
+      font-size: .95rem; font-weight: 700; cursor: pointer; transition: background .15s;
+      margin-right: 10px;
+    }
+    #btn-new:hover { background: var(--primary-dark); }
+
+    /* ===== EMPTY STATE ===== */
+    .empty-row td { text-align: center; color: var(--muted); padding: 28px; font-style: italic; }
+
+    /* ===== PRINT ===== */
+    @media print {
+      body { background: #fff; font-size: 11pt; }
+      header { background: #1e40af !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      #upload-zone, #progress-wrap, #btn-export-wrap, .table-filters, .print-hide { display: none !important; }
+      #report { display: block !important; }
+      .card, .table-section, #timeline-section, #report-header { box-shadow: none; border: 1px solid #e2e8f0; break-inside: avoid; }
+      table { font-size: 9pt; }
+      #summary-cards { grid-template-columns: repeat(4,1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="7" width="16" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/>
+    <path d="M19 7h1a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-1"/>
+  </svg>
+  <div>
+    <h1>EV Charger Log Analyzer</h1>
+    <p>Análisis de logs MQTT de cargadores de vehículos eléctricos</p>
+  </div>
+</header>
+
+<main>
+
+  <!-- Upload zone -->
+  <div id="upload-zone" role="button" tabindex="0" aria-label="Zona de carga de fichero Excel">
+    <input type="file" id="file-input" accept=".xlsx,.xls" aria-label="Seleccionar fichero Excel" />
+    <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <h2>Arrastra aquí tu fichero Excel</h2>
+    <p>Formatos soportados: .xlsx, .xls</p>
+    <button id="btn-select" type="button">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Seleccionar fichero
+    </button>
+  </div>
+
+  <!-- Progress -->
+  <div id="progress-wrap">
+    <div id="progress-bar-outer"><div id="progress-bar"></div></div>
+    <div id="progress-label">Procesando…</div>
+  </div>
+
+  <!-- Report -->
+  <div id="report">
+
+    <div id="btn-export-wrap" class="print-hide">
+      <button id="btn-new" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Nuevo análisis
+      </button>
+      <button id="btn-export" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Exportar informe (PDF)
+      </button>
+    </div>
+
+    <!-- 1. Header -->
+    <div id="report-header">
+      <div class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Cabecera del Informe
+      </div>
+      <div class="report-header-grid" id="report-meta-grid"></div>
+    </div>
+
+    <!-- 2. Summary cards -->
+    <div id="summary-cards"></div>
+
+    <!-- 3. Timeline -->
+    <div id="timeline-section">
+      <div class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Timeline de Estados por Conector
+      </div>
+      <div id="timeline-charts"></div>
+    </div>
+
+    <!-- 4. Anomaly table -->
+    <div class="table-section">
+      <div class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Tabla Detallada de Anomalías
+      </div>
+      <div class="table-filters print-hide">
+        <select id="filter-type">
+          <option value="">Todos los tipos</option>
+          <option value="ERROR_CRITICO">Error crítico</option>
+          <option value="TRANSICION_INVALIDA">Transición inválida</option>
+          <option value="SESION_CORTA">Sesión corta</option>
+          <option value="ADVERTENCIA">Advertencia</option>
+        </select>
+        <select id="filter-connector">
+          <option value="">Todos los conectores</option>
+        </select>
+        <input type="text" id="filter-search" placeholder="Buscar…" style="flex:1;min-width:160px;" />
+      </div>
+      <div class="table-wrap">
+        <table id="anomaly-table">
+          <thead>
+            <tr>
+              <th data-col="ts">Fecha/Hora <span class="sort-icon">↕</span></th>
+              <th data-col="charger">Cargador <span class="sort-icon">↕</span></th>
+              <th data-col="connector">Conector <span class="sort-icon">↕</span></th>
+              <th data-col="prevState">Estado anterior <span class="sort-icon">↕</span></th>
+              <th data-col="newState">Estado nuevo <span class="sort-icon">↕</span></th>
+              <th data-col="type">Tipo de anomalía <span class="sort-icon">↕</span></th>
+              <th data-col="desc">Descripción <span class="sort-icon">↕</span></th>
+            </tr>
+          </thead>
+          <tbody id="anomaly-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 5. Sessions table -->
+    <div class="table-section">
+      <div class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Sesiones de Carga Detectadas
+      </div>
+      <div class="table-wrap">
+        <table id="sessions-table">
+          <thead>
+            <tr>
+              <th data-col="charger">Cargador</th>
+              <th data-col="connector">Conector</th>
+              <th data-col="start">Inicio</th>
+              <th data-col="end">Fin</th>
+              <th data-col="duration">Duración</th>
+              <th data-col="energy">Energía (Wh)</th>
+              <th data-col="anomalous">¿Anómala?</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- #report -->
+</main>
+
+<script>
+/* ================================================================
+   EV CHARGER LOG ANALYZER — Main Script
+   ================================================================ */
+
+// ── STATE DEFINITIONS ──────────────────────────────────────────
+const STATE_NAMES = {
+  0: 'Init', 1: 'Disconnected', 2: 'DisconnectedPermission',
+  3: 'Connected', 4: 'ConnectedPermission',
+  5: 'Charging', 6: 'ChargeLimited', 7: 'ChargePaused', 8: 'ChargeFinished',
+  9: 'ErrorHardware', 10: 'ErrorLeakageAC', 11: 'ErrorLeakageDC',
+  12: 'ErrorPEDiode', 13: 'ErrorPEGround',
+  14: 'OnHigh', 30: 'OnLow', 31: 'Off', 32: 'Inoperative',
+  33: 'Selected', 34: 'Reserved', 35: 'ErrorMotor', 36: 'ErrorNeutralPE'
+};
+
+const ERROR_STATES = new Set([9, 10, 11, 12, 13, 35, 36]);
+const CHARGING_STATES = new Set([5, 6, 7]);
+const SYSTEM_STATES = new Set([14, 30, 31, 32, 33, 34]);
+
+// Valid transitions as a Set of "from:to" strings
+const VALID_TRANSITIONS = new Set([
+  '0:1',
+  '1:2', '1:3',
+  '2:3',
+  '3:4',
+  '4:5', '4:6',
+  '5:6', '5:7', '5:8',
+  '6:5', '6:7', '6:8',
+  '7:5', '7:6', '7:8',
+  '8:1'
+]);
+
+function isValidTransition(from, to) {
+  // Any → error states
+  if (ERROR_STATES.has(to)) return true;
+  // Any → Disconnected (cable unplugged at any time)
+  if (to === 1) return true;
+  // System states can appear at any time as operator-driven
+  if (SYSTEM_STATES.has(from) || SYSTEM_STATES.has(to)) return true;
+  return VALID_TRANSITIONS.has(`${from}:${to}`);
+}
+
+// State colors for timeline
+const STATE_COLORS = {
+  0: '#94a3b8', 1: '#94a3b8', 2: '#64748b',
+  3: '#60a5fa', 4: '#3b82f6',
+  5: '#22c55e', 6: '#86efac', 7: '#fbbf24', 8: '#a3e635',
+  9: '#ef4444', 10: '#ef4444', 11: '#ef4444', 12: '#ef4444', 13: '#ef4444',
+  14: '#f97316', 30: '#f97316', 31: '#6b7280', 32: '#6b7280',
+  33: '#a78bfa', 34: '#c4b5fd', 35: '#ef4444', 36: '#ef4444'
+};
+
+// ── GLOBALS ────────────────────────────────────────────────────
+let anomalyData = [];
+let sessionData = [];
+let timelineChartInstances = [];
+
+// ── DRAG & DROP / FILE INPUT ────────────────────────────────────
+const uploadZone = document.getElementById('upload-zone');
+const fileInput  = document.getElementById('file-input');
+const btnSelect  = document.getElementById('btn-select');
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) processFile(fileInput.files[0]); });
+btnSelect.addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
+uploadZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+document.getElementById('btn-new').addEventListener('click', resetUI);
+document.getElementById('btn-export').addEventListener('click', exportReport);
+
+// ── PROGRESS ───────────────────────────────────────────────────
+function setProgress(pct, label) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = label;
+}
+
+// ── FILE PROCESSING ────────────────────────────────────────────
+function processFile(file) {
+  document.getElementById('progress-wrap').style.display = 'block';
+  setProgress(5, 'Leyendo fichero…');
+  uploadZone.style.display = 'none';
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      setProgress(20, 'Parseando Excel…');
+      const workbook = XLSX.read(e.target.result, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      setProgress(40, 'Analizando mensajes…');
+      const result = analyzeLog(rows);
+      if (result.processedCount === 0) {
+        document.getElementById('progress-wrap').style.display = 'none';
+        uploadZone.style.display = '';
+        alert('No se encontraron mensajes del topic processes/modulator en el fichero. Comprueba que el Excel tenga el formato correcto.');
+        return;
+      }
+      setProgress(80, 'Generando informe…');
+      renderReport(result);
+      setProgress(100, 'Listo');
+      setTimeout(() => { document.getElementById('progress-wrap').style.display = 'none'; }, 600);
+    } catch (err) {
+      document.getElementById('progress-wrap').style.display = 'none';
+      uploadZone.style.display = '';
+      alert('Error al procesar el fichero:\n' + err.message);
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── LOG ANALYSIS ───────────────────────────────────────────────
+function analyzeLog(rows) {
+  // Normalize column names (trim, lowercase mapping)
+  const colMap = {};
+  if (rows.length > 0) {
+    Object.keys(rows[0]).forEach(k => {
+      const kn = k.trim().toLowerCase().replace(/\//g, '_');
+      colMap[kn] = k;
+    });
+  }
+  function getCol(row, name) {
+    // Try exact, then lowercase, then partial
+    if (row[name] !== undefined) return row[name];
+    const kl = Object.keys(row).find(k => k.toLowerCase().replace(/\//g, '_') === name);
+    if (kl) return row[kl];
+    return '';
+  }
+
+  const anomalies = [];
+  const sessions  = [];
+  const chargerIds = new Set();
+  const connectorIds = new Set(); // key: "charger|connectorName"
+
+  // Per-connector state tracking: key = "charger:connectorId"
+  const connectorState = {};  // key → { lastState, lastTs, inCharging, chargingStart, chargingEnergy, chargingLastActive, sessionAnomalous }
+  // For timeline: per connector, array of {ts, state}
+  const timelineData = {};    // key → [{ts, state, label}]
+
+  let minTs = Infinity, maxTs = -Infinity;
+  let processedCount = 0;
+
+  rows.forEach((row, idx) => {
+    const topic   = String(getCol(row, 'topic') || '');
+    const msgStr  = String(getCol(row, 'mensaje') || '');
+    const fechaHora = String(getCol(row, 'fecha_hora') || getCol(row, 'fecha/hora') || getCol(row, 'fechahora') || '');
+
+    if (!topic.includes('processes/modulator')) return;
+    processedCount++;
+
+    // Extract charger ID
+    const chargerId = extractChargerId(topic);
+    if (chargerId) chargerIds.add(chargerId);
+
+    // Parse timestamp
+    const ts = parseTimestamp(fechaHora);
+    if (ts) {
+      if (ts < minTs) minTs = ts;
+      if (ts > maxTs) maxTs = ts;
+    }
+
+    // Parse payload
+    let payload;
+    try { payload = JSON.parse(msgStr); } catch (parseErr) {
+      console.warn(`[Row ${idx}] JSON parse error:`, parseErr.message);
+      return;
+    }
+    const elements = payload?.data?.elements;
+    if (!Array.isArray(elements)) return;
+
+    elements.forEach(el => {
+      const connId   = el.connectorId;
+      const connName = el.connectorName || `Conector ${connId}`;
+      const state    = el.state;
+      const active   = el.now?.active ?? 0;
+
+      if (state === undefined || state === null) return;
+
+      const connKey = `${chargerId}:${connId}`;
+      connectorIds.add(connKey);
+
+      // ── Timeline data ──
+      if (!timelineData[connKey]) timelineData[connKey] = [];
+      timelineData[connKey].push({ ts, state, label: fechaHora });
+
+      // ── State machine ──
+      if (!connectorState[connKey]) {
+        connectorState[connKey] = {
+          lastState: state, lastTs: ts,
+          inCharging: false, chargingStart: null, chargingEnergy: 0,
+          chargingLastActive: 0, sessionAnomalous: false,
+          charger: chargerId, connName, connId,
+          sessionStartTs: null
+        };
+        // Begin charging session if already in charging state
+        if (CHARGING_STATES.has(state)) {
+          connectorState[connKey].inCharging = true;
+          connectorState[connKey].chargingStart = ts;
+          connectorState[connKey].sessionStartTs = ts;
+        }
+        return;
+      }
+
+      const cs = connectorState[connKey];
+      const prevState = cs.lastState;
+
+      // ── Anomaly 1: Error states ──
+      if (ERROR_STATES.has(state) && !ERROR_STATES.has(prevState)) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: connName,
+          prevState, newState: state,
+          type: 'ERROR_CRITICO',
+          desc: `Estado de error detectado: ${STATE_NAMES[state] || state}`
+        });
+        if (cs.inCharging) cs.sessionAnomalous = true;
+      }
+
+      // ── Anomaly 3: Invalid transition ──
+      if (prevState !== state) {
+        if (!isValidTransition(prevState, state)) {
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'TRANSICION_INVALIDA',
+            desc: `Transición no permitida: ${STATE_NAMES[prevState] ?? prevState} → ${STATE_NAMES[state] ?? state}`
+          });
+          if (cs.inCharging) cs.sessionAnomalous = true;
+        }
+      }
+
+      // ── Anomaly 4: Off/Inoperative in active charging ──
+      if ((state === 31 || state === 32) && cs.inCharging) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: connName,
+          prevState, newState: state,
+          type: 'ADVERTENCIA',
+          desc: `${STATE_NAMES[state]} detectado durante sesión de carga activa`
+        });
+        cs.sessionAnomalous = true;
+      }
+
+      // ── Session tracking ──
+      const wasCharging = CHARGING_STATES.has(prevState);
+      const isCharging  = CHARGING_STATES.has(state);
+
+      // Accumulate energy during charging (cap delta at 5 minutes to guard against log gaps)
+      if (cs.inCharging && isCharging) {
+        const MAX_DELTA_SEC = 300;
+        const dtSec = (ts != null && cs.lastTs != null) ? Math.min((ts - cs.lastTs) / 1000, MAX_DELTA_SEC) : 0;
+        cs.chargingEnergy += active * (dtSec / 3600); // Wh
+      }
+
+      // Session start
+      if (!wasCharging && isCharging) {
+        cs.inCharging = true;
+        cs.chargingStart = ts;
+        cs.sessionStartTs = ts;
+        cs.chargingEnergy = 0;
+        cs.chargingLastActive = active;
+        cs.sessionAnomalous = false;
+      }
+
+      // Session end
+      if (wasCharging && !isCharging && cs.inCharging) {
+        cs.inCharging = false;
+        const durMs = (ts && cs.chargingStart) ? ts - cs.chargingStart : 0;
+        const durSec = durMs / 1000;
+        let anomalous = cs.sessionAnomalous;
+
+        // Anomaly 2: short session
+        if (durSec > 0 && durSec < 60) {
+          anomalous = true;
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'SESION_CORTA',
+            desc: `Sesión de carga demasiado corta: ${Math.round(durSec)}s (< 60s)`
+          });
+        }
+
+        sessions.push({
+          charger: chargerId, connector: connName,
+          start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
+          end: ts, endLabel: tsToLabel(ts),
+          durationSec: durSec, energy: Math.round(cs.chargingEnergy),
+          anomalous
+        });
+        cs.chargingStart = null;
+        cs.sessionAnomalous = false;
+      }
+
+      cs.lastState = state;
+      cs.lastTs    = ts;
+    });
+  });
+
+  // Close any open sessions at end of log
+  Object.values(connectorState).forEach(cs => {
+    if (cs.inCharging && cs.chargingStart) {
+      sessions.push({
+        charger: cs.charger, connector: cs.connName,
+        start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
+        end: maxTs, endLabel: tsToLabel(maxTs),
+        durationSec: (maxTs - cs.chargingStart) / 1000,
+        energy: Math.round(cs.chargingEnergy),
+        anomalous: cs.sessionAnomalous
+      });
+    }
+  });
+
+  return {
+    chargerIds: [...chargerIds],
+    connectorIds: [...connectorIds],
+    processedCount,
+    minTs, maxTs,
+    anomalies,
+    sessions,
+    timelineData,
+    connectorState
+  };
+}
+
+// ── HELPERS ────────────────────────────────────────────────────
+function extractChargerId(topic) {
+  const parts = topic.split('/');
+  return parts.find(p => p.startsWith('EVVC')) || 'Desconocido';
+}
+
+function parseTimestamp(str) {
+  if (!str) return null;
+  // Try "dd/MM/yyyy HH:mm:ss"
+  const m = String(str).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (m) return new Date(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T${m[4]}:${m[5]}:${m[6]}`).getTime();
+  // Try ISO
+  const d = new Date(str);
+  return isNaN(d) ? null : d.getTime();
+}
+
+function tsToLabel(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleString('es-ES');
+}
+
+function formatDuration(sec) {
+  if (!sec || sec <= 0) return '—';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.round(sec % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// ── RENDER REPORT ──────────────────────────────────────────────
+function renderReport(result) {
+  anomalyData = result.anomalies;
+  sessionData = result.sessions;
+
+  // Show report
+  document.getElementById('report').style.display = '';
+
+  // 1. Header
+  const metaGrid = document.getElementById('report-meta-grid');
+  metaGrid.innerHTML = '';
+  const metas = [
+    { label: 'Cargador(es)', value: result.chargerIds.length > 0 ? result.chargerIds.join(', ') : '—' },
+    { label: 'Rango de fechas', value: result.minTs !== Infinity ? `${tsToLabel(result.minTs)} – ${tsToLabel(result.maxTs)}` : '—' },
+    { label: 'Mensajes procesados', value: result.processedCount.toLocaleString('es-ES') },
+    { label: 'Conectores detectados', value: result.connectorIds.length }
+  ];
+  metas.forEach(m => {
+    const dl = document.createElement('dl');
+    dl.className = 'report-meta';
+    dl.innerHTML = `<dt>${m.label}</dt><dd>${m.value}</dd>`;
+    metaGrid.appendChild(dl);
+  });
+
+  // 2. Summary cards
+  const critical          = result.anomalies.filter(a => a.type === 'ERROR_CRITICO').length;
+  const invalid           = result.anomalies.filter(a => a.type === 'TRANSICION_INVALIDA').length;
+  const shortSessionCount = result.anomalies.filter(a => a.type === 'SESION_CORTA').length;
+  const warns             = result.anomalies.filter(a => a.type === 'ADVERTENCIA').length;
+  const cardsData = [
+    { value: critical,          label: 'Errores críticos',       cls: 'danger'  },
+    { value: invalid,           label: 'Transiciones inválidas', cls: 'warning' },
+    { value: shortSessionCount, label: 'Sesiones cortas',        cls: 'info'    },
+    { value: warns,             label: 'Advertencias',           cls: 'success' }
+  ];
+  const cardsEl = document.getElementById('summary-cards');
+  cardsEl.innerHTML = '';
+  cardsData.forEach(c => {
+    const div = document.createElement('div');
+    div.className = `card ${c.cls}`;
+    div.innerHTML = `<div class="card-value">${c.value}</div><div class="card-label">${c.label}</div>`;
+    cardsEl.appendChild(div);
+  });
+
+  // 3. Timeline
+  renderTimelines(result);
+
+  // 4. Anomaly table
+  populateConnectorFilter(result.connectorState);
+  renderAnomalyTable();
+  setupAnomalyFilters();
+  setupAnomalySorting();
+
+  // 5. Sessions table
+  renderSessionsTable();
+}
+
+// ── TIMELINE ───────────────────────────────────────────────────
+function renderTimelines(result) {
+  // Destroy previous charts
+  timelineChartInstances.forEach(c => c.destroy());
+  timelineChartInstances = [];
+
+  const container = document.getElementById('timeline-charts');
+  container.innerHTML = '';
+
+  result.connectorIds.forEach(connKey => {
+    const data = result.timelineData[connKey] || [];
+    if (data.length === 0) return;
+
+    const cs = result.connectorState[connKey];
+    const label = `${connKey.split(':')[0]} — ${cs?.connName || connKey.split(':')[1]}`;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'timeline-connector';
+    wrap.innerHTML = `<h3>${label}</h3><div class="timeline-canvas-wrap"><canvas></canvas></div>`;
+    container.appendChild(wrap);
+    const canvas = wrap.querySelector('canvas');
+
+    // Build bar chart segments: each row = 1 segment, x = timestamp, bar width = 1 unit time
+    // Use Chart.js bar chart with time scale
+    const TIMELINE_TAIL_MS = 30000; // 30s extension for the last segment
+
+    // Use floating bars: each point covers [ts, nextTs]
+    const floatData = [];
+    for (let i = 0; i < data.length; i++) {
+      const startMs = data[i].ts;
+      let endMs;
+      if (i + 1 < data.length) {
+        endMs = data[i + 1].ts;
+      } else if (startMs != null) {
+        endMs = startMs + TIMELINE_TAIL_MS;
+      } else {
+        endMs = null;
+      }
+      if (startMs == null || endMs == null) continue;
+      floatData.push({
+        x: [startMs, endMs],
+        state: data[i].state,
+        label: data[i].label
+      });
+    }
+
+    const chart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        datasets: [{
+          data: floatData.map(d => ({ x: d.x, y: 1 })),
+          backgroundColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
+          borderColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
+          borderWidth: 0,
+          borderRadius: 2
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: items => {
+                const idx = items[0].dataIndex;
+                return floatData[idx]?.label || '';
+              },
+              label: items => {
+                const idx = items.dataIndex;
+                const state = floatData[idx]?.state;
+                return `Estado: ${STATE_NAMES[state] ?? state}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            min: data[0]?.ts,
+            max: data[data.length - 1]?.ts,
+            ticks: {
+              callback: v => {
+                const d = new Date(v);
+                return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+              },
+              maxTicksLimit: 8,
+              font: { size: 10 }
+            },
+            grid: { color: '#f1f5f9' }
+          },
+          y: {
+            display: false
+          }
+        }
+      }
+    });
+    timelineChartInstances.push(chart);
+  });
+
+  if (container.innerHTML === '') {
+    container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No hay datos de timeline disponibles.</p>';
+  }
+}
+
+// ── ANOMALY TABLE ──────────────────────────────────────────────
+let anomalySortCol = 'ts';
+let anomalySortDir = 1; // 1=asc, -1=desc
+
+function renderAnomalyTable() {
+  const typeFilter      = (document.getElementById('filter-type')?.value      || '').trim();
+  const connFilter      = (document.getElementById('filter-connector')?.value  || '').trim();
+  const searchFilter    = (document.getElementById('filter-search')?.value     || '').trim().toLowerCase();
+
+  let data = [...anomalyData];
+
+  if (typeFilter)   data = data.filter(a => a.type === typeFilter);
+  if (connFilter)   data = data.filter(a => `${a.charger}:${a.connector}` === connFilter);
+  if (searchFilter) data = data.filter(a =>
+    [a.ts, a.charger, a.connector, a.desc, STATE_NAMES[a.prevState], STATE_NAMES[a.newState]]
+      .some(v => String(v||'').toLowerCase().includes(searchFilter))
+  );
+
+  // Sort
+  data.sort((a, b) => {
+    let va = a[anomalySortCol] ?? '';
+    let vb = b[anomalySortCol] ?? '';
+    if (anomalySortCol === 'ts') { va = a.tsRaw || 0; vb = b.tsRaw || 0; }
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    return va < vb ? -anomalySortDir : va > vb ? anomalySortDir : 0;
+  });
+
+  const tbody = document.getElementById('anomaly-tbody');
+  tbody.innerHTML = '';
+
+  if (data.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No se encontraron anomalías con los filtros actuales.</td></tr>';
+    return;
+  }
+
+  data.forEach(a => {
+    const badgeCls = {
+      ERROR_CRITICO: 'badge-danger',
+      TRANSICION_INVALIDA: 'badge-warning',
+      SESION_CORTA: 'badge-info',
+      ADVERTENCIA: 'badge-success'
+    }[a.type] || 'badge-muted';
+    const typeLabel = {
+      ERROR_CRITICO: 'Error crítico',
+      TRANSICION_INVALIDA: 'Trans. inválida',
+      SESION_CORTA: 'Sesión corta',
+      ADVERTENCIA: 'Advertencia'
+    }[a.type] || a.type;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escHtml(a.ts)}</td>
+      <td>${escHtml(a.charger)}</td>
+      <td>${escHtml(a.connector)}</td>
+      <td>${stateBadge(a.prevState)}</td>
+      <td>${stateBadge(a.newState)}</td>
+      <td><span class="badge ${badgeCls}">${typeLabel}</span></td>
+      <td>${escHtml(a.desc)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function stateBadge(state) {
+  if (state === undefined || state === null) return '—';
+  const name = STATE_NAMES[state] ?? `Estado ${state}`;
+  const cls = ERROR_STATES.has(state) ? 'badge-danger' : CHARGING_STATES.has(state) ? 'badge-success' : 'badge-muted';
+  return `<span class="badge ${cls}">${escHtml(name)} (${state})</span>`;
+}
+
+function setupAnomalyFilters() {
+  ['filter-type', 'filter-connector', 'filter-search'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', renderAnomalyTable);
+  });
+}
+
+function setupAnomalySorting() {
+  document.querySelectorAll('#anomaly-table thead th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (anomalySortCol === col) anomalySortDir *= -1;
+      else { anomalySortCol = col; anomalySortDir = 1; }
+      document.querySelectorAll('#anomaly-table thead th .sort-icon').forEach(s => s.textContent = '↕');
+      th.querySelector('.sort-icon').textContent = anomalySortDir === 1 ? '↑' : '↓';
+      renderAnomalyTable();
+    });
+  });
+}
+
+function populateConnectorFilter(connectorState) {
+  const sel = document.getElementById('filter-connector');
+  // Remove old options except first
+  while (sel.options.length > 1) sel.remove(1);
+  // Build unique charger:connName entries from connectorState
+  const seen = new Set();
+  Object.values(connectorState).forEach(cs => {
+    const key = `${cs.charger}:${cs.connName}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = `${cs.charger} — ${cs.connName}`;
+    sel.appendChild(opt);
+  });
+}
+
+// ── SESSIONS TABLE ────────────────────────────────────────────
+function renderSessionsTable() {
+  const tbody = document.getElementById('sessions-tbody');
+  tbody.innerHTML = '';
+
+  if (sessionData.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No se detectaron sesiones de carga.</td></tr>';
+    return;
+  }
+
+  sessionData.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escHtml(s.charger)}</td>
+      <td>${escHtml(s.connector)}</td>
+      <td>${escHtml(s.startLabel)}</td>
+      <td>${escHtml(s.endLabel)}</td>
+      <td>${formatDuration(s.durationSec)}</td>
+      <td>${s.energy.toLocaleString('es-ES')}</td>
+      <td class="${s.anomalous ? 'anomaly-yes' : 'anomaly-no'}">${s.anomalous ? '⚠ Sí' : '✓ No'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── EXPORT REPORT ──────────────────────────────────────────────
+function exportReport() {
+  window.print();
+}
+
+// ── RESET ──────────────────────────────────────────────────────
+function resetUI() {
+  document.getElementById('report').style.display = 'none';
+  document.getElementById('upload-zone').style.display = '';
+  document.getElementById('progress-wrap').style.display = 'none';
+  document.getElementById('file-input').value = '';
+  timelineChartInstances.forEach(c => c.destroy());
+  timelineChartInstances = [];
+  anomalyData = [];
+  sessionData = [];
+}
+
+// ── UTILS ──────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
