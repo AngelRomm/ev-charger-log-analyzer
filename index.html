@@ -430,13 +430,26 @@ function processFile(file) {
       setProgress(20, 'Parseando Excel…');
       const workbook = XLSX.read(e.target.result, { type: 'array' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, dateNF: 'dd/mm/yyyy hh:mm:ss' });
+      if (rows.length > 0) {
+        console.log('[EV Analyzer] Columnas detectadas:', Object.keys(rows[0]));
+        console.log('[EV Analyzer] Primera fila:', rows[0]);
+      }
       setProgress(40, 'Analizando mensajes…');
       const result = analyzeLog(rows);
       if (result.processedCount === 0) {
         document.getElementById('progress-wrap').style.display = 'none';
         uploadZone.style.display = '';
-        alert('No se encontraron mensajes del topic processes/modulator en el fichero. Comprueba que el Excel tenga el formato correcto.');
+        const colNames = rows.length > 0 ? Object.keys(rows[0]).join(', ') : 'ninguna';
+        alert(
+          `No se encontraron mensajes del topic "processes/modulator".\n\n` +
+          `Filas totales en el Excel: ${rows.length}\n` +
+          `Columnas detectadas: ${colNames}\n\n` +
+          `Comprueba que:\n` +
+          `1. El Excel tenga las columnas: Fecha/Hora, Comando, Topic, Mensaje\n` +
+          `2. La columna "Topic" contenga la cadena "processes/modulator"\n` +
+          `3. El fichero no esté vacío o sea la hoja correcta`
+        );
         return;
       }
       setProgress(80, 'Generando informe…');
@@ -455,19 +468,18 @@ function processFile(file) {
 
 // ── LOG ANALYSIS ───────────────────────────────────────────────
 function analyzeLog(rows) {
-  // Normalize column names (trim, lowercase mapping)
-  const colMap = {};
-  if (rows.length > 0) {
-    Object.keys(rows[0]).forEach(k => {
-      const kn = k.trim().toLowerCase().replace(/\//g, '_');
-      colMap[kn] = k;
-    });
-  }
-  function getCol(row, name) {
-    // Try exact, then lowercase, then partial
-    if (row[name] !== undefined) return row[name];
-    const kl = Object.keys(row).find(k => k.toLowerCase().replace(/\//g, '_') === name);
-    if (kl) return row[kl];
+  function getCol(row, ...candidates) {
+    for (const name of candidates) {
+      // Exact match
+      if (row[name] !== undefined && row[name] !== '') return row[name];
+    }
+    // Case-insensitive + normalize slashes
+    const normalize = s => s.trim().toLowerCase().replace(/[\/\\]/g, '_').replace(/\s+/g, '_');
+    for (const name of candidates) {
+      const normName = normalize(name);
+      const key = Object.keys(row).find(k => normalize(k) === normName);
+      if (key !== undefined && row[key] !== undefined && row[key] !== '') return row[key];
+    }
     return '';
   }
 
@@ -485,9 +497,9 @@ function analyzeLog(rows) {
   let processedCount = 0;
 
   rows.forEach((row, idx) => {
-    const topic   = String(getCol(row, 'topic') || '');
-    const msgStr  = String(getCol(row, 'mensaje') || '');
-    const fechaHora = String(getCol(row, 'fecha_hora') || getCol(row, 'fecha/hora') || getCol(row, 'fechahora') || '');
+    const fechaHora = String(getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') || '');
+    const topic     = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
+    const msgStr    = String(getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') || '');
 
     if (!topic.includes('processes/modulator')) return;
     processedCount++;
@@ -505,8 +517,19 @@ function analyzeLog(rows) {
 
     // Parse payload
     let payload;
-    try { payload = JSON.parse(msgStr); } catch (parseErr) {
-      console.warn(`[Row ${idx}] JSON parse error:`, parseErr.message);
+    try {
+      let raw = msgStr;
+      // SheetJS sometimes wraps strings in extra quotes
+      if (typeof raw === 'object') {
+        payload = raw; // already parsed
+      } else {
+        raw = String(raw).trim();
+        // Remove BOM if present
+        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+        payload = JSON.parse(raw);
+      }
+    } catch (parseErr) {
+      console.warn(`[Row ${idx}] Error al parsear Mensaje:`, parseErr.message, '| Valor:', msgStr?.toString().substring(0, 100));
       return;
     }
     const elements = payload?.data?.elements;
@@ -676,10 +699,15 @@ function extractChargerId(topic) {
 
 function parseTimestamp(str) {
   if (!str) return null;
-  // Try "dd/MM/yyyy HH:mm:ss"
-  const m = String(str).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
-  if (m) return new Date(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T${m[4]}:${m[5]}:${m[6]}`).getTime();
-  // Try ISO
+  // Si es número, puede ser serial de Excel (días desde 1900-01-01)
+  const num = Number(str);
+  if (!isNaN(num) && num > 1000) {
+    // Convertir serial Excel a timestamp JS
+    return Math.round((num - 25569) * 86400 * 1000); // 25569 = days from Excel epoch (1900-01-01) to Unix epoch (1970-01-01)
+  }
+  // Try "dd/MM/yyyy HH:mm:ss" or "d/M/yyyy H:mm:ss"
+  const m = String(str).match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+  if (m) return new Date(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T${m[4].padStart(2,'0')}:${m[5]}:${m[6]}`).getTime();
   const d = new Date(str);
   return isNaN(d) ? null : d.getTime();
 }
