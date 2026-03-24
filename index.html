@@ -430,10 +430,21 @@ function processFile(file) {
       setProgress(20, 'Parseando Excel…');
       const workbook = XLSX.read(e.target.result, { type: 'array' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, dateNF: 'dd/mm/yyyy hh:mm:ss' });
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
       if (rows.length > 0) {
-        console.log('[EV Analyzer] Columnas detectadas:', Object.keys(rows[0]));
-        console.log('[EV Analyzer] Primera fila:', rows[0]);
+        const firstRow = rows[0];
+        console.log('[EV Analyzer] Columnas detectadas:', Object.keys(firstRow));
+        console.log('[EV Analyzer] Primera fila completa:', firstRow);
+        const modulatorRow = rows.find(r => String(r['Topic'] || r['topic'] || '').includes('processes/modulator'));
+        if (modulatorRow) {
+          console.log('[EV Analyzer] Primera fila con processes/modulator:', modulatorRow);
+          const msgVal = modulatorRow['Mensaje'] || modulatorRow['mensaje'] || '';
+          console.log('[EV Analyzer] Tipo del campo Mensaje:', typeof msgVal, '| Primeros 200 chars:', String(msgVal).substring(0, 200));
+        } else {
+          console.warn('[EV Analyzer] NO se encontró ninguna fila con "processes/modulator" en Topic');
+          const topics = rows.slice(0, 5).map(r => r['Topic'] || r['topic'] || '(vacío)');
+          console.warn('[EV Analyzer] Primeros 5 topics:', topics);
+        }
       }
       setProgress(40, 'Analizando mensajes…');
       const result = analyzeLog(rows);
@@ -497,9 +508,9 @@ function analyzeLog(rows) {
   let processedCount = 0;
 
   rows.forEach((row, idx) => {
-    const fechaHora = String(getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') || '');
+    const fechaHora = getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') ?? '';
     const topic     = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
-    const msgStr    = String(getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') || '');
+    const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
 
     if (!topic.includes('processes/modulator')) return;
     processedCount++;
@@ -519,14 +530,19 @@ function analyzeLog(rows) {
     let payload;
     try {
       let raw = msgStr;
-      // SheetJS sometimes wraps strings in extra quotes
-      if (typeof raw === 'object') {
-        payload = raw; // already parsed
+      if (typeof raw === 'object' && raw !== null) {
+        payload = raw;
       } else {
         raw = String(raw).trim();
-        // Remove BOM if present
         if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-        payload = JSON.parse(raw);
+        // Intentar parseo directo
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          // Algunos Excel exportan el JSON con comillas escapadas: {\"data\":...}
+          // Se reemplaza \" → " para obtener JSON válido y se vuelve a intentar
+          payload = JSON.parse(raw.replace(/\\"/g, '"'));
+        }
       }
     } catch (parseErr) {
       console.warn(`[Row ${idx}] Error al parsear Mensaje:`, parseErr.message, '| Valor:', msgStr?.toString().substring(0, 100));
@@ -536,12 +552,12 @@ function analyzeLog(rows) {
     if (!Array.isArray(elements)) return;
 
     elements.forEach(el => {
-      const connId   = el.connectorId;
+      const connId   = Number(el.connectorId);
       const connName = el.connectorName || `Conector ${connId}`;
-      const state    = el.state;
-      const active   = el.now?.active ?? 0;
+      const state    = Number(el.state);
+      const active   = Number(el.now?.active ?? 0);
 
-      if (state === undefined || state === null) return;
+      if (el.state === undefined || el.state === null || isNaN(state)) return;
 
       const connKey = `${chargerId}:${connId}`;
       connectorIds.add(connKey);
@@ -698,18 +714,22 @@ function extractChargerId(topic) {
 }
 
 function parseTimestamp(str) {
-  if (!str) return null;
+  if (!str && str !== 0) return null;
   // Si es número, puede ser serial de Excel (días desde 1900-01-01)
   const num = Number(str);
-  if (!isNaN(num) && num > 1000) {
+  if (!isNaN(num) && num > 1000 && num < 2958466) {
     // Convertir serial Excel a timestamp JS
-    return Math.round((num - 25569) * 86400 * 1000); // 25569 = days from Excel epoch (1900-01-01) to Unix epoch (1970-01-01)
+    // 25569 = días desde el epoch Excel (1900-01-01) al epoch Unix (1970-01-01)
+    // 2958466 = serial de Excel para 9999-12-31 (cota superior para evitar falsos positivos)
+    return Math.round((num - 25569) * 86400 * 1000);
   }
-  // Try "dd/MM/yyyy HH:mm:ss" or "d/M/yyyy H:mm:ss"
-  const m = String(str).match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+  const s = String(str).trim();
+  // dd/MM/yyyy HH:mm:ss  o  d/M/yyyy H:mm:ss (formato ES)
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})[T\s]+(\d{1,2}):(\d{2}):(\d{2})/);
   if (m) return new Date(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T${m[4].padStart(2,'0')}:${m[5]}:${m[6]}`).getTime();
-  const d = new Date(str);
-  return isNaN(d) ? null : d.getTime();
+  // Intentar ISO directo u otros formatos reconocidos por Date
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.getTime();
 }
 
 function tsToLabel(ts) {
