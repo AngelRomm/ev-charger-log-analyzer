@@ -114,11 +114,56 @@
     .card.success .card-value { color: var(--success); }
     .card-label { font-size: .82rem; color: var(--muted); font-weight: 500; }
 
-    /* ===== TIMELINE ===== */
+    /* ===== TIMELINE (Gantt swimlane) ===== */
     #timeline-section {
       background: var(--card); border-radius: var(--radius);
       padding: 24px 28px; box-shadow: var(--shadow); margin-bottom: 24px;
-      overflow-x: auto;
+    }
+    #timeline-charts { display: flex; flex-direction: column; gap: 6px; }
+    .tl-row { display: flex; align-items: center; margin-bottom: 4px; }
+    .tl-label {
+      width: 160px; flex-shrink: 0; font-size: .78rem; font-weight: 600;
+      color: var(--text); padding-right: 10px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .tl-track {
+      flex: 1; position: relative; height: 34px;
+      background: #f1f5f9; border-radius: 4px; overflow: hidden; min-width: 400px;
+    }
+    .tl-block {
+      position: absolute; height: 100%; border-radius: 3px;
+      overflow: hidden; cursor: pointer; box-sizing: border-box;
+      border-right: 1px solid rgba(255,255,255,.4);
+    }
+    .tl-block span {
+      display: block; padding: 0 5px; color: #fff;
+      font-size: 10px; line-height: 34px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      user-select: none;
+    }
+    .tl-axis { display: flex; margin-top: 2px; }
+    .tl-axis-spacer { width: 160px; flex-shrink: 0; }
+    .tl-axis-area {
+      flex: 1; position: relative; height: 22px;
+      border-top: 1px solid var(--border); min-width: 400px;
+    }
+    .tl-tick {
+      position: absolute; transform: translateX(-50%);
+      font-size: .68rem; color: var(--muted); white-space: nowrap; top: 3px;
+    }
+    .tl-legend { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+    .tl-legend-label { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 700; margin-right: 4px; }
+    .tl-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: .8rem; color: var(--text); }
+    .tl-legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+
+    /* ===== TIMELINE TOOLTIP ===== */
+    #timeline-tooltip {
+      position: fixed; display: none; z-index: 9999;
+      background: #1e293b; color: #fff;
+      padding: 10px 14px; border-radius: 6px;
+      font-size: .82rem; line-height: 1.6;
+      max-width: 280px; pointer-events: none;
+      box-shadow: 0 4px 16px rgba(0,0,0,.3);
     }
     #timeline-charts { display: flex; flex-direction: column; gap: 32px; }
 
@@ -437,6 +482,9 @@
   </div><!-- #report -->
 </main>
 
+<!-- Custom tooltip for Gantt timeline -->
+<div id="timeline-tooltip"></div>
+
 <script>
 /* ================================================================
    EV CHARGER LOG ANALYZER — Main Script
@@ -570,7 +618,12 @@ function processFile(file) {
           `No se encontraron mensajes con el campo "state" en ningún topic.\n\n` +
           `Filas totales en el Excel: ${rows.length}\n` +
           `Columnas detectadas: ${colNames}\n\n` +
+          `El analizador acepta cualquier topic cuyo payload JSON contenga\n` +
+          `un campo "state" (en payload.state, payload.data.state,\n` +
+          `payload.data.elements[].state, payload.data.connectors[].state, etc.).\n\n` +
           `Comprueba que:\n` +
+          `1. El Excel tenga las columnas: Fecha/Hora, Topic, Mensaje\n` +
+          `2. La columna "Mensaje" contenga JSON con un campo "state"\n` +
           `1. El Excel tenga las columnas: Fecha/Hora, Comando, Topic, Mensaje\n` +
           `2. La columna "Mensaje" contenga JSON con el campo "state" (en cualquier topic)\n` +
           `3. El fichero no esté vacío o sea la hoja correcta`
@@ -630,7 +683,149 @@ function analyzeLog(rows) {
     const topic     = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
     const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
 
-    if (!topic.includes('processes/modulator')) return;
+    if (!topic.includes('processes/modulator')) {
+      // === NON-MODULATOR FALLBACK: scan any topic for a 'state' field ===
+      const payloadFb = parseMessagePayload(msgStr);
+      if (!payloadFb) return;
+
+      // Extract elements with a 'state' field from any location in the payload
+      const stateElements = extractStateElements(payloadFb);
+      if (stateElements.length === 0) return;
+
+      const chargerId = extractChargerId(topic);
+      if (chargerId) chargerIds.add(chargerId);
+
+      const ts = parseTimestamp(fechaHora);
+      if (ts) {
+        if (ts < minTs) minTs = ts;
+        if (ts > maxTs) maxTs = ts;
+      }
+
+      processedCount++;
+
+      stateElements.forEach(el => {
+        const connId   = Number(el.connectorId ?? 0);
+        const connName = el.connectorName || `Conector ${connId}`;
+
+        // Handle state as number or string name
+        let state = el.state;
+        if (typeof state === 'string') {
+          const found = Object.entries(STATE_NAMES).find(([, v]) => v.toLowerCase() === state.toLowerCase());
+          state = found ? Number(found[0]) : NaN;
+        }
+        state = Number(state);
+        if (el.state === undefined || el.state === null || isNaN(state)) return;
+
+        const connKey = `${chargerId}:${connId}`;
+        connectorIds.add(connKey);
+
+        // ── Timeline data ──
+        if (!timelineData[connKey]) timelineData[connKey] = [];
+        timelineData[connKey].push({ ts, state, label: fechaHora });
+
+        // ── State machine ──
+        if (!connectorState[connKey]) {
+          connectorState[connKey] = {
+            lastState: state, lastTs: ts,
+            inCharging: false, chargingStart: null, chargingEnergy: 0,
+            chargingLastActive: 0, sessionAnomalous: false,
+            charger: chargerId, connName, connId,
+            sessionStartTs: null, lastActive: 0,
+            _activeDivisor: 1, lastChargeEnergy: null
+          };
+          if (CHARGING_STATES.has(state)) {
+            connectorState[connKey].inCharging = true;
+            connectorState[connKey].chargingStart = ts;
+            connectorState[connKey].sessionStartTs = ts;
+          }
+          return;
+        }
+
+        const cs = connectorState[connKey];
+        const prevState = cs.lastState;
+
+        // ── Anomaly 1: Error states ──
+        if (ERROR_STATES.has(state) && !ERROR_STATES.has(prevState)) {
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'ERROR_CRITICO',
+            desc: `Estado de error detectado: ${STATE_NAMES[state] || state}`
+          });
+          if (cs.inCharging) cs.sessionAnomalous = true;
+        }
+
+        // ── Anomaly 2: Invalid transition ──
+        if (prevState !== state && !isValidTransition(prevState, state)) {
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'TRANSICION_INVALIDA',
+            desc: `Transición no permitida: ${STATE_NAMES[prevState] ?? prevState} → ${STATE_NAMES[state] ?? state}`
+          });
+          if (cs.inCharging) cs.sessionAnomalous = true;
+        }
+
+        // ── Anomaly 3: Off/Inoperative during charging ──
+        if ((state === 31 || state === 32) && cs.inCharging) {
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'ADVERTENCIA',
+            desc: `${STATE_NAMES[state]} detectado durante sesión de carga activa`
+          });
+          cs.sessionAnomalous = true;
+        }
+
+        // ── Session tracking ──
+        const wasCharging = CHARGING_STATES.has(prevState);
+        const isCharging  = CHARGING_STATES.has(state);
+
+        if (!wasCharging && isCharging) {
+          cs.inCharging = true;
+          cs.chargingStart = ts;
+          cs.sessionStartTs = ts;
+          cs.chargingEnergy = 0;
+          cs.sessionAnomalous = false;
+        }
+
+        if (wasCharging && !isCharging && cs.inCharging) {
+          cs.inCharging = false;
+          const durMs  = (ts && cs.chargingStart) ? ts - cs.chargingStart : 0;
+          const durSec = durMs / 1000;
+          let anomalous = cs.sessionAnomalous;
+
+          if (durSec > 0 && durSec < 60) {
+            anomalous = true;
+            anomalies.push({
+              ts: fechaHora, tsRaw: ts,
+              charger: chargerId, connector: connName,
+              prevState, newState: state,
+              type: 'SESION_CORTA',
+              desc: `Sesión de carga demasiado corta: ${Math.round(durSec)}s (< 60s)`
+            });
+          }
+
+          sessions.push({
+            charger: chargerId, connector: connName,
+            start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
+            end: ts, endLabel: tsToLabel(ts),
+            durationSec: durSec, energy: 0, anomalous
+          });
+          cs.chargingStart = null;
+          cs.sessionAnomalous = false;
+        }
+
+        cs.lastState = state;
+        cs.lastTs    = ts;
+      });
+      return; // end non-modulator path
+    }
+
+    // === MODULATOR PATH (unchanged) ===
     processedCount++;
 
     // Extract charger ID
@@ -644,26 +839,10 @@ function analyzeLog(rows) {
       if (ts > maxTs) maxTs = ts;
     }
 
-    // Parse payload
-    let payload;
-    try {
-      let raw = msgStr;
-      if (typeof raw === 'object' && raw !== null) {
-        payload = raw;
-      } else {
-        raw = String(raw).trim();
-        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-        // Intentar parseo directo
-        try {
-          payload = JSON.parse(raw);
-        } catch {
-          // Algunos Excel exportan el JSON con comillas escapadas: {\"data\":...}
-          // Se reemplaza \" → " para obtener JSON válido y se vuelve a intentar
-          payload = JSON.parse(raw.replace(/\\"/g, '"'));
-        }
-      }
-    } catch (parseErr) {
-      console.warn(`[Row ${idx}] Error al parsear Mensaje:`, parseErr.message, '| Valor:', msgStr?.toString().substring(0, 100));
+    // Parse payload using shared helper
+    const payload = parseMessagePayload(msgStr);
+    if (!payload) {
+      console.warn(`[Row ${idx}] Error al parsear Mensaje: | Valor:`, msgStr?.toString().substring(0, 100));
       return;
     }
     // Diagnostic logs for first modulator row
@@ -1174,6 +1353,63 @@ function extractChargerId(topic) {
   return parts.find(p => p.startsWith('EVVC')) || 'Desconocido';
 }
 
+// ── SHARED JSON PAYLOAD PARSER ────────────────────────────────────
+// Parses a Mensaje field (string or already-parsed object) into an object.
+// Returns null if parsing fails (caller should skip the row).
+// Handles BOM, escaped quotes produced by some Excel exports, and raw objects.
+function parseMessagePayload(msgStr) {
+  try {
+    if (typeof msgStr === 'object' && msgStr !== null) return msgStr;
+    let raw = String(msgStr).trim();
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // strip BOM
+    try {
+      return JSON.parse(raw);
+    } catch {
+      // Some Excel exports produce escaped quotes: {\"data\":...} → retry after unescape
+      return JSON.parse(raw.replace(/\\"/g, '"'));
+    }
+  } catch {
+    return null;
+  }
+}
+
+// ── EXTRACT STATE ELEMENTS FROM ANY PAYLOAD ─────────────────────
+// Searches for items with a 'state' field in:
+//   payload.state (scalar)
+//   payload.data.state (scalar)
+//   payload.data.elements[*] / connectors[*] / slots[*]
+//   any other array inside payload.data with items that have .state
+function extractStateElements(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+
+  // Case 1: direct state at payload root
+  if (payload.state !== undefined) {
+    return [{ state: payload.state, connectorId: 0, connectorName: 'Conector 0', now: payload.now }];
+  }
+
+  const data = payload.data;
+  if (data === undefined || data === null) return [];
+
+  // Case 2: payload.data.state (scalar)
+  if (data.state !== undefined) {
+    return [{ state: data.state, connectorId: 0, connectorName: 'Conector 0', now: data.now }];
+  }
+
+  // Case 3: known array keys (elements, connectors, slots) then any array with state items
+  const checkKeys = ['elements', 'connectors', 'slots', ...Object.keys(data)];
+  const seen = new Set();
+  for (const k of checkKeys) {
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const v = data[k];
+    if (Array.isArray(v) && v.length > 0 && v[0]?.state !== undefined) {
+      return v.filter(el => el != null && el.state !== undefined);
+    }
+  }
+
+  return [];
+}
+
 function parseTimestamp(str) {
   if (!str && str !== 0) return null;
   // Si es número, puede ser serial de Excel (días desde 1900-01-01)
@@ -1292,16 +1528,159 @@ function renderReport(result) {
   renderGapsTable();
 }
 
-// ── TIMELINE ───────────────────────────────────────────────────
+// ── TIMELINE (Gantt swimlane — pure CSS/HTML, no Chart.js) ─────
 function renderTimelines(result) {
   const container = document.getElementById('timeline-charts');
   container.innerHTML = '';
 
+  const visibleKeys = (result.connectorIds || []).filter(k => (result.timelineData[k] || []).length > 0);
+  if (visibleKeys.length === 0) {
   if (!result.connectorIds || result.connectorIds.length === 0) {
     container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No hay datos de timeline disponibles.</p>';
     return;
   }
 
+  const minTs   = result.minTs === Infinity  ? 0 : result.minTs;
+  const maxTs   = result.maxTs === -Infinity ? 0 : result.maxTs;
+  const totalMs = (maxTs - minTs) || 1;
+  const TAIL_MS = 30000; // 30 s extension for the last segment
+
+  // Collect all states that actually appear (for the legend)
+  const appearingStates = new Set();
+
+  // ── Build swimlane rows ────────────────────────────────────────
+  const rowsHtml = visibleKeys.map(connKey => {
+    const data = result.timelineData[connKey] || [];
+    const cs   = result.connectorState[connKey];
+    const connLabel = `${connKey.split(':')[0]} — ${cs?.connName || connKey.split(':')[1]}`;
+
+    const chargerForKey = connKey.split(':')[0];
+    const chargerGaps   = (result.connectivityGaps || []).filter(g => g.chargerId === chargerForKey);
+
+    // Build state blocks
+    const blocksHtml = data.map((pt, i) => {
+      const startMs = pt.ts;
+      const endMs   = i + 1 < data.length ? data[i + 1].ts : (startMs != null ? startMs + TAIL_MS : null);
+      if (startMs == null || endMs == null || endMs <= startMs) return '';
+
+      const state     = pt.state;
+      const stateName = STATE_NAMES[state] ?? `Estado ${state}`;
+      const color     = STATE_COLORS[state] || '#cbd5e1';
+      const leftPct   = ((startMs - minTs) / totalMs * 100).toFixed(4);
+      const widthPct  = ((endMs - startMs) / totalMs * 100).toFixed(4);
+
+      appearingStates.add(state);
+
+      // Encode tooltip data into individual data-* attributes (safe, state is always a number)
+      return `<div class="tl-block"
+        style="left:${leftPct}%;width:${widthPct}%;background:${color};"
+        data-state="${escHtml(String(state))}"
+        data-state-name="${escHtml(stateName)}"
+        data-start="${escHtml(tsToLabel(startMs))}"
+        data-end="${escHtml(tsToLabel(endMs))}"
+        data-dur="${escHtml(String(((endMs - startMs) / 1000).toFixed(0)))}"
+      >${Number(widthPct) > 2 ? `<span>${escHtml(stateName)}</span>` : ''}</div>`;
+    }).join('');
+
+    // Gap overlays (red translucent bands)
+    const gapsHtml = chargerGaps.map(g => {
+      const leftPct  = ((g.gapStart - minTs) / totalMs * 100).toFixed(4);
+      const widthPct = ((g.gapEnd - g.gapStart) / totalMs * 100).toFixed(4);
+      return `<div style="position:absolute;left:${leftPct}%;width:${widthPct}%;height:100%;
+        background:rgba(239,68,68,.22);border:1px solid rgba(239,68,68,.5);
+        box-sizing:border-box;z-index:2;pointer-events:none;"
+        title="Gap de conectividad: ${escHtml(formatDuration(g.durationSec))}"></div>`;
+    }).join('');
+
+    return `<div class="tl-row">
+      <div class="tl-label" title="${escHtml(connLabel)}">${escHtml(connLabel)}</div>
+      <div class="tl-track" style="overflow-x:hidden;">${blocksHtml}${gapsHtml}</div>
+    </div>`;
+  }).join('');
+
+  // ── Time axis ─────────────────────────────────────────────────
+  const ticks    = buildTimeTicks(minTs, maxTs, 8);
+  const ticksHtml = ticks.map(t => {
+    const pct   = ((t - minTs) / totalMs * 100).toFixed(3);
+    const label = tsToAxisLabel(t);
+    return `<span class="tl-tick" style="left:${pct}%">${escHtml(label)}</span>`;
+  }).join('');
+
+  // ── Colour legend ─────────────────────────────────────────────
+  const legendItemsHtml = [...appearingStates].sort((a, b) => a - b).map(s => {
+    const name  = STATE_NAMES[s] ?? `Estado ${s}`;
+    const color = STATE_COLORS[s] || '#cbd5e1';
+    return `<span class="tl-legend-item">
+      <span class="tl-legend-swatch" style="background:${color};"></span>${escHtml(name)}
+    </span>`;
+  }).join('');
+
+  // ── Assemble HTML ─────────────────────────────────────────────
+  container.innerHTML = `
+    <div style="overflow-x:auto;">
+      <div style="min-width:600px;">
+        ${rowsHtml}
+        <div class="tl-axis">
+          <div class="tl-axis-spacer"></div>
+          <div class="tl-axis-area">${ticksHtml}</div>
+        </div>
+        <div class="tl-legend">
+          <span class="tl-legend-label">Leyenda:</span>
+          ${legendItemsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // ── Tooltip via event delegation on container ─────────────────
+  container.addEventListener('mousemove', handleTlTooltip);
+  container.addEventListener('mouseleave', hideTimelineTip);
+}
+
+// ── TIMELINE TOOLTIP HELPERS ───────────────────────────────────
+function handleTlTooltip(e) {
+  const block = e.target.closest('.tl-block');
+  if (!block) { hideTimelineTip(); return; }
+  const tip = document.getElementById('timeline-tooltip');
+  const stateName = block.dataset.stateName;
+  const state     = block.dataset.state;
+  const start     = block.dataset.start;
+  const end       = block.dataset.end;
+  const durSec    = Number(block.dataset.dur);
+  tip.innerHTML = `
+    <strong>${escHtml(stateName)}</strong> <span style="opacity:.7">(id: ${escHtml(state)})</span><br>
+    <span>🕐 Inicio: ${escHtml(start)}</span><br>
+    <span>🕑 Fin: &nbsp;&nbsp;${escHtml(end)}</span><br>
+    <span>⏱ Duración: ${escHtml(formatDuration(durSec))}</span>
+  `;
+  tip.style.display = 'block';
+  positionTip(e);
+}
+
+function positionTip(e) {
+  const tip = document.getElementById('timeline-tooltip');
+  if (!tip || tip.style.display === 'none') return;
+  const x  = e.clientX + 16;
+  const y  = e.clientY - 12;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const tw = tip.offsetWidth  || 240;
+  const th = tip.offsetHeight || 80;
+  tip.style.left = (x + tw > vw ? vw - tw - 8 : x) + 'px';
+  tip.style.top  = (y + th > vh ? vh - th - 8 : y) + 'px';
+}
+
+function hideTimelineTip() {
+  const tip = document.getElementById('timeline-tooltip');
+  if (tip) tip.style.display = 'none';
+}
+
+// ── BUILD TIME AXIS TICKS ──────────────────────────────────────
+function buildTimeTicks(minTs, maxTs, count) {
+  if (minTs === maxTs) return [minTs];
+  const ticks = [];
+  for (let i = 0; i <= count; i++) {
+    ticks.push(minTs + (maxTs - minTs) * i / count);
   const minTs   = result.minTs;
   const maxTs   = result.maxTs;
   const totalMs = maxTs - minTs;
@@ -1432,6 +1811,14 @@ function renderTimelines(result) {
   if (container.innerHTML === '') {
     container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No hay datos de timeline disponibles.</p>';
   }
+  return ticks;
+}
+
+// Short label for the time axis (HH:MM if same day, else dd/MM HH:MM)
+function tsToAxisLabel(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 }
 
 // ── ANOMALY TABLE ──────────────────────────────────────────────
@@ -1755,6 +2142,9 @@ function resetUI() {
   document.getElementById('upload-zone').style.display = '';
   document.getElementById('progress-wrap').style.display = 'none';
   document.getElementById('file-input').value = '';
+  // Clear timeline HTML (no Chart.js instances to destroy)
+  document.getElementById('timeline-charts').innerHTML = '';
+  hideTimelineTip();
   document.getElementById('timeline-charts').innerHTML = '';
   const tt = document.getElementById('tl-tooltip');
   if (tt) tt.style.display = 'none';
