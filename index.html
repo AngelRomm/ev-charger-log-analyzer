@@ -165,6 +165,23 @@
       max-width: 280px; pointer-events: none;
       box-shadow: 0 4px 16px rgba(0,0,0,.3);
     }
+    #timeline-charts { display: flex; flex-direction: column; gap: 32px; }
+
+    /* ===== GANTT TIMELINE ===== */
+    .tl-wrap { overflow-x: auto; }
+    .tl-inner { min-width: 600px; position: relative; }
+    .tl-row { display: flex; align-items: center; margin-bottom: 6px; min-height: 36px; }
+    .tl-label { width: 160px; flex-shrink: 0; font-size: .8rem; font-weight: 700; color: var(--text); padding-right: 10px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl-track { flex: 1; height: 32px; background: var(--bg); border-radius: 4px; position: relative; overflow: visible; }
+    .tl-seg { position: absolute; top: 0; height: 100%; border-radius: 3px; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: default; transition: filter .15s; box-sizing: border-box; }
+    .tl-seg:hover { filter: brightness(1.15); z-index: 10; }
+    .tl-seg-label { font-size: .68rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+    .tl-axis { display: flex; margin-left: 160px; margin-top: 4px; margin-bottom: 12px; position: relative; min-height: 20px; }
+    .tl-tick { position: absolute; transform: translateX(-50%); font-size: .7rem; color: var(--muted); white-space: nowrap; }
+    .tl-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
+    .tl-legend-item { display: flex; align-items: center; gap: 5px; font-size: .78rem; color: var(--text); }
+    .tl-legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+    #tl-tooltip { position: fixed; background: rgba(15,23,42,.92); color: #f8fafc; font-size: .78rem; padding: 8px 12px; border-radius: 8px; pointer-events: none; z-index: 9999; display: none; max-width: 240px; line-height: 1.6; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
 
     /* ===== TABLES ===== */
     .table-section {
@@ -521,6 +538,11 @@ const STATE_COLORS = {
   33: '#a78bfa', 34: '#c4b5fd', 35: '#ef4444', 36: '#ef4444'
 };
 
+// Reverse lookup: state name (lowercase) → numeric id
+const STATE_NAMES_REVERSE = Object.fromEntries(
+  Object.entries(STATE_NAMES).map(([k, v]) => [v.toLowerCase(), Number(k)])
+);
+
 // ── GLOBALS ────────────────────────────────────────────────────
 let anomalyData = [];
 let sessionData = [];
@@ -602,6 +624,8 @@ function processFile(file) {
           `Comprueba que:\n` +
           `1. El Excel tenga las columnas: Fecha/Hora, Topic, Mensaje\n` +
           `2. La columna "Mensaje" contenga JSON con un campo "state"\n` +
+          `1. El Excel tenga las columnas: Fecha/Hora, Comando, Topic, Mensaje\n` +
+          `2. La columna "Mensaje" contenga JSON con el campo "state" (en cualquier topic)\n` +
           `3. El fichero no esté vacío o sea la hoja correcta`
         );
         return;
@@ -1007,6 +1031,170 @@ function analyzeLog(rows) {
     });
   });
 
+  // ── SECOND PASS: Universal state detection for non-modulator topics ──
+  rows.forEach((row, idx) => {
+    const fechaHora = getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') ?? '';
+    const topic     = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
+    const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
+
+    // Already handled by the modulator-specific pass above
+    if (topic.includes('processes/modulator')) return;
+
+    // Parse payload
+    let payload;
+    try {
+      let raw = msgStr;
+      if (typeof raw === 'object' && raw !== null) {
+        payload = raw;
+      } else {
+        raw = String(raw).trim();
+        if (!raw) return;
+        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+        try { payload = JSON.parse(raw); } catch { payload = JSON.parse(raw.replace(/\\"/g, '"')); }
+      }
+    } catch { return; }
+
+    if (!payload || typeof payload !== 'object') return;
+
+    const chargerId = extractChargerId(topic);
+    const ts = parseTimestamp(fechaHora);
+    if (ts) {
+      if (ts < minTs) minTs = ts;
+      if (ts > maxTs) maxTs = ts;
+    }
+    if (chargerId) chargerIds.add(chargerId);
+
+    // Collect state events: [{state, connId, connName}]
+    const stateEvents = [];
+
+    if (payload.state !== undefined) {
+      stateEvents.push({ state: resolveState(payload.state), connId: 0, connName: 'Principal' });
+    }
+    if (payload.data && typeof payload.data === 'object') {
+      if (payload.data.state !== undefined) {
+        stateEvents.push({ state: resolveState(payload.data.state), connId: 0, connName: 'Principal' });
+      }
+      // Check all arrays inside data for items with a state field
+      Object.values(payload.data).forEach(arr => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach(el => {
+          if (!el || el.state === undefined) return;
+          const connId   = (el.connectorId !== undefined) ? Number(el.connectorId) : 0;
+          const connName = el.connectorName || `Conector ${connId}`;
+          stateEvents.push({ state: resolveState(el.state), connId, connName });
+        });
+      });
+    }
+
+    let rowHadState = false;
+    stateEvents.forEach(({ state, connId, connName }) => {
+      if (isNaN(state)) return;
+
+      if (!rowHadState) { processedCount++; rowHadState = true; }
+
+      const connKey = `${chargerId}:${connId}`;
+      connectorIds.add(connKey);
+
+      if (ts) {
+        if (!timelineData[connKey]) timelineData[connKey] = [];
+        timelineData[connKey].push({ ts, state, label: fechaHora });
+      }
+
+      if (!connectorState[connKey]) {
+        connectorState[connKey] = {
+          lastState: state, lastTs: ts,
+          inCharging: CHARGING_STATES.has(state),
+          chargingStart: CHARGING_STATES.has(state) ? ts : null,
+          chargingEnergy: 0, chargingLastActive: 0,
+          sessionAnomalous: false,
+          charger: chargerId, connName, connId,
+          sessionStartTs: CHARGING_STATES.has(state) ? ts : null,
+          lastActive: 0, _activeDivisor: 1, lastChargeEnergy: null
+        };
+        return;
+      }
+
+      const cs = connectorState[connKey];
+      const prevState = cs.lastState;
+
+      // Anomaly 1: Error states
+      if (ERROR_STATES.has(state) && !ERROR_STATES.has(prevState)) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: cs.connName,
+          prevState, newState: state,
+          type: 'ERROR_CRITICO',
+          desc: `Estado de error detectado: ${STATE_NAMES[state] || state}`
+        });
+        if (cs.inCharging) cs.sessionAnomalous = true;
+      }
+
+      // Anomaly 3: Invalid transition
+      if (prevState !== state && !isValidTransition(prevState, state)) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: cs.connName,
+          prevState, newState: state,
+          type: 'TRANSICION_INVALIDA',
+          desc: `Transición no permitida: ${STATE_NAMES[prevState] ?? prevState} → ${STATE_NAMES[state] ?? state}`
+        });
+        if (cs.inCharging) cs.sessionAnomalous = true;
+      }
+
+      // Anomaly 4: Off/Inoperative during charging
+      if ((state === 31 || state === 32) && cs.inCharging) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: cs.connName,
+          prevState, newState: state,
+          type: 'ADVERTENCIA',
+          desc: `${STATE_NAMES[state]} detectado durante sesión de carga activa`
+        });
+        cs.sessionAnomalous = true;
+      }
+
+      // Session tracking
+      const wasCharging = CHARGING_STATES.has(prevState);
+      const isCharging  = CHARGING_STATES.has(state);
+
+      if (!wasCharging && isCharging) {
+        cs.inCharging = true;
+        cs.chargingStart = ts;
+        cs.sessionStartTs = ts;
+        cs.chargingEnergy = 0;
+        cs.sessionAnomalous = false;
+      }
+
+      if (wasCharging && !isCharging && cs.inCharging) {
+        cs.inCharging = false;
+        const durMs  = (ts && cs.chargingStart) ? ts - cs.chargingStart : 0;
+        const durSec = durMs / 1000;
+        let anomalous = cs.sessionAnomalous;
+        if (durSec > 0 && durSec < 60) {
+          anomalous = true;
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: cs.connName,
+            prevState, newState: state,
+            type: 'SESION_CORTA',
+            desc: `Sesión de carga demasiado corta: ${Math.round(durSec)}s (< 60s)`
+          });
+        }
+        sessions.push({
+          charger: chargerId, connector: cs.connName,
+          start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
+          end: ts, endLabel: tsToLabel(ts),
+          durationSec: durSec, energy: 0, anomalous
+        });
+        cs.chargingStart  = null;
+        cs.sessionAnomalous = false;
+      }
+
+      cs.lastState = state;
+      cs.lastTs    = ts;
+    });
+  });
+
   // Close any open sessions at end of log
   Object.values(connectorState).forEach(cs => {
     if (cs.inCharging && cs.chargingStart) {
@@ -1257,6 +1445,16 @@ function formatDuration(sec) {
   return `${s}s`;
 }
 
+function resolveState(val) {
+  if (val === undefined || val === null) return NaN;
+  if (typeof val === 'string') {
+    const n = STATE_NAMES_REVERSE[val.toLowerCase()];
+    return (n !== undefined) ? n : NaN;
+  }
+  const n = Number(val);
+  return isNaN(n) ? NaN : n;
+}
+
 // ── RENDER REPORT ──────────────────────────────────────────────
 function renderReport(result) {
   anomalyData  = result.anomalies;
@@ -1337,6 +1535,7 @@ function renderTimelines(result) {
 
   const visibleKeys = (result.connectorIds || []).filter(k => (result.timelineData[k] || []).length > 0);
   if (visibleKeys.length === 0) {
+  if (!result.connectorIds || result.connectorIds.length === 0) {
     container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No hay datos de timeline disponibles.</p>';
     return;
   }
@@ -1482,6 +1681,135 @@ function buildTimeTicks(minTs, maxTs, count) {
   const ticks = [];
   for (let i = 0; i <= count; i++) {
     ticks.push(minTs + (maxTs - minTs) * i / count);
+  const minTs   = result.minTs;
+  const maxTs   = result.maxTs;
+  const totalMs = maxTs - minTs;
+  if (!totalMs || totalMs <= 0) return;
+
+  // Ensure tooltip div exists
+  let tooltip = document.getElementById('tl-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'tl-tooltip';
+    document.body.appendChild(tooltip);
+  }
+
+  // Track which states appear for legend
+  const seenStates = new Set();
+
+  const inner = document.createElement('div');
+  inner.className = 'tl-inner';
+
+  result.connectorIds.forEach(connKey => {
+    const data = result.timelineData[connKey] || [];
+    if (data.length === 0) return;
+    const cs = result.connectorState[connKey];
+    const [chargerId, connectorId] = connKey.split(':');
+    const labelText = `${chargerId} — ${cs?.connName || ('Conector ' + connectorId)}`;
+
+    // Build float segments
+    const segs = [];
+    const TAIL_MS = 30000;
+    for (let i = 0; i < data.length; i++) {
+      const startMs = data[i].ts;
+      const endMs   = (i + 1 < data.length) ? data[i + 1].ts : startMs + TAIL_MS;
+      if (startMs == null || endMs == null || endMs <= startMs) continue;
+      segs.push({ startMs, endMs, state: data[i].state, label: data[i].label });
+      seenStates.add(data[i].state);
+    }
+
+    const row = document.createElement('div');
+    row.className = 'tl-row';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'tl-label';
+    lbl.title = labelText;
+    lbl.textContent = labelText;
+
+    const track = document.createElement('div');
+    track.className = 'tl-track';
+
+    segs.forEach(seg => {
+      const pctLeft  = ((seg.startMs - minTs) / totalMs) * 100;
+      const pctWidth = ((seg.endMs - seg.startMs) / totalMs) * 100;
+      const color = STATE_COLORS[seg.state] || '#cbd5e1';
+      const name  = STATE_NAMES[seg.state]  || `Estado ${seg.state}`;
+
+      const block = document.createElement('div');
+      block.className = 'tl-seg';
+      block.style.left = pctLeft + '%';
+      block.style.width = pctWidth + '%';
+      block.style.background = color;
+
+      const innerLabel = document.createElement('span');
+      innerLabel.className = 'tl-seg-label';
+      innerLabel.textContent = name;
+      block.appendChild(innerLabel);
+
+      block.addEventListener('mouseenter', () => {
+        const dur = seg.endMs - seg.startMs;
+        tooltip.innerHTML =
+          `<strong>${escHtml(name)}</strong> <span style="opacity:.6">(${escHtml(String(seg.state))})</span><br>` +
+          `Inicio: ${escHtml(tsToLabel(seg.startMs))}<br>` +
+          `Fin: ${escHtml(tsToLabel(seg.endMs))}<br>` +
+          `Duración: ${escHtml(formatDuration(dur / 1000))}`;
+        tooltip.style.display = 'block';
+      });
+      block.addEventListener('mousemove', e => {
+        tooltip.style.left = (e.clientX + 14) + 'px';
+        tooltip.style.top  = (e.clientY - 10) + 'px';
+      });
+      block.addEventListener('mouseleave', () => {
+        tooltip.style.display = 'none';
+      });
+
+      track.appendChild(block);
+    });
+
+    row.appendChild(lbl);
+    row.appendChild(track);
+    inner.appendChild(row);
+  });
+
+  // Time axis
+  const axis = document.createElement('div');
+  axis.className = 'tl-axis';
+  const TICKS = 8;
+  for (let i = 0; i <= TICKS; i++) {
+    const frac = i / TICKS;
+    const ts   = minTs + frac * totalMs;
+    const tick = document.createElement('div');
+    tick.className = 'tl-tick';
+    tick.style.left = (frac * 100) + '%';
+    tick.textContent = new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    axis.appendChild(tick);
+  }
+  inner.appendChild(axis);
+
+  // Legend
+  const legend = document.createElement('div');
+  legend.className = 'tl-legend';
+  [...seenStates].sort((a, b) => a - b).forEach(state => {
+    const item = document.createElement('div');
+    item.className = 'tl-legend-item';
+    const dot = document.createElement('div');
+    dot.className = 'tl-legend-dot';
+    dot.style.background = STATE_COLORS[state] || '#cbd5e1';
+    const name = document.createElement('span');
+    name.textContent = `${STATE_NAMES[state] || state} (${state})`;
+    item.appendChild(dot);
+    item.appendChild(name);
+    legend.appendChild(item);
+  });
+  inner.appendChild(legend);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'tl-wrap';
+  wrap.appendChild(inner);
+  container.appendChild(wrap);
+
+  if (container.innerHTML === '') {
+    container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No hay datos de timeline disponibles.</p>';
   }
   return ticks;
 }
@@ -1817,6 +2145,9 @@ function resetUI() {
   // Clear timeline HTML (no Chart.js instances to destroy)
   document.getElementById('timeline-charts').innerHTML = '';
   hideTimelineTip();
+  document.getElementById('timeline-charts').innerHTML = '';
+  const tt = document.getElementById('tl-tooltip');
+  if (tt) tt.style.display = 'none';
   anomalyData   = [];
   sessionData   = [];
   bootEventData = [];
