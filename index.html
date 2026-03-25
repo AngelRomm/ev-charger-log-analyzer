@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EV Charger Log Analyzer</title>
   <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -115,16 +114,74 @@
     .card.success .card-value { color: var(--success); }
     .card-label { font-size: .82rem; color: var(--muted); font-weight: 500; }
 
-    /* ===== TIMELINE ===== */
+    /* ===== TIMELINE (Gantt swimlane) ===== */
     #timeline-section {
       background: var(--card); border-radius: var(--radius);
       padding: 24px 28px; box-shadow: var(--shadow); margin-bottom: 24px;
-      overflow-x: auto;
+    }
+    #timeline-charts { display: flex; flex-direction: column; gap: 6px; }
+    .tl-row { display: flex; align-items: center; margin-bottom: 4px; }
+    .tl-label {
+      width: 160px; flex-shrink: 0; font-size: .78rem; font-weight: 600;
+      color: var(--text); padding-right: 10px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .tl-track {
+      flex: 1; position: relative; height: 34px;
+      background: #f1f5f9; border-radius: 4px; overflow: hidden; min-width: 400px;
+    }
+    .tl-block {
+      position: absolute; height: 100%; border-radius: 3px;
+      overflow: hidden; cursor: pointer; box-sizing: border-box;
+      border-right: 1px solid rgba(255,255,255,.4);
+    }
+    .tl-block span {
+      display: block; padding: 0 5px; color: #fff;
+      font-size: 10px; line-height: 34px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      user-select: none;
+    }
+    .tl-axis { display: flex; margin-top: 2px; }
+    .tl-axis-spacer { width: 160px; flex-shrink: 0; }
+    .tl-axis-area {
+      flex: 1; position: relative; height: 22px;
+      border-top: 1px solid var(--border); min-width: 400px;
+    }
+    .tl-tick {
+      position: absolute; transform: translateX(-50%);
+      font-size: .68rem; color: var(--muted); white-space: nowrap; top: 3px;
+    }
+    .tl-legend { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+    .tl-legend-label { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 700; margin-right: 4px; }
+    .tl-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: .8rem; color: var(--text); }
+    .tl-legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+
+    /* ===== TIMELINE TOOLTIP ===== */
+    #timeline-tooltip {
+      position: fixed; display: none; z-index: 9999;
+      background: #1e293b; color: #fff;
+      padding: 10px 14px; border-radius: 6px;
+      font-size: .82rem; line-height: 1.6;
+      max-width: 280px; pointer-events: none;
+      box-shadow: 0 4px 16px rgba(0,0,0,.3);
     }
     #timeline-charts { display: flex; flex-direction: column; gap: 32px; }
-    .timeline-connector { }
-    .timeline-connector h3 { font-size: .9rem; font-weight: 700; color: var(--text); margin-bottom: 10px; }
-    .timeline-canvas-wrap { position: relative; height: 110px; width: 100%; min-width: 600px; }
+
+    /* ===== GANTT TIMELINE ===== */
+    .tl-wrap { overflow-x: auto; }
+    .tl-inner { min-width: 600px; position: relative; }
+    .tl-row { display: flex; align-items: center; margin-bottom: 6px; min-height: 36px; }
+    .tl-label { width: 160px; flex-shrink: 0; font-size: .8rem; font-weight: 700; color: var(--text); padding-right: 10px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl-track { flex: 1; height: 32px; background: var(--bg); border-radius: 4px; position: relative; overflow: visible; }
+    .tl-seg { position: absolute; top: 0; height: 100%; border-radius: 3px; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: default; transition: filter .15s; box-sizing: border-box; }
+    .tl-seg:hover { filter: brightness(1.15); z-index: 10; }
+    .tl-seg-label { font-size: .68rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+    .tl-axis { display: flex; margin-left: 160px; margin-top: 4px; margin-bottom: 12px; position: relative; min-height: 20px; }
+    .tl-tick { position: absolute; transform: translateX(-50%); font-size: .7rem; color: var(--muted); white-space: nowrap; }
+    .tl-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
+    .tl-legend-item { display: flex; align-items: center; gap: 5px; font-size: .78rem; color: var(--text); }
+    .tl-legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+    #tl-tooltip { position: fixed; background: rgba(15,23,42,.92); color: #f8fafc; font-size: .78rem; padding: 8px 12px; border-radius: 8px; pointer-events: none; z-index: 9999; display: none; max-width: 240px; line-height: 1.6; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
 
     /* ===== TABLES ===== */
     .table-section {
@@ -377,23 +434,26 @@
       </div>
     </div>
 
-    <!-- 6. Boot / Init events table -->
-    <div class="table-section">
+    <!-- 6. Boot/reset events table -->
+    <div class="table-section" id="boot-events-section" style="display:none">
       <div class="section-title">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        Eventos de Arranque / Boot
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Eventos de Arranque / Reset (init_boot/sys)
       </div>
       <div class="table-wrap">
-        <table id="boot-events-table">
+        <table id="boot-table">
           <thead>
             <tr>
-              <th>Fecha/Hora</th>
-              <th>Cargador</th>
-              <th>rst_reason</th>
-              <th>Severidad</th>
+              <th data-col="ts">Fecha/Hora <span class="sort-icon">↕</span></th>
+              <th data-col="charger">Cargador <span class="sort-icon">↕</span></th>
+              <th data-col="deviceId">ID dispositivo <span class="sort-icon">↕</span></th>
+              <th data-col="cmd">Tipo cmd <span class="sort-icon">↕</span></th>
+              <th data-col="rstReason">rst_reason <span class="sort-icon">↕</span></th>
+              <th data-col="rstLabel">Motivo del reset <span class="sort-icon">↕</span></th>
+              <th data-col="severity">Severidad <span class="sort-icon">↕</span></th>
             </tr>
           </thead>
-          <tbody id="boot-events-tbody"></tbody>
+          <tbody id="boot-tbody"></tbody>
         </table>
       </div>
     </div>
@@ -421,6 +481,9 @@
 
   </div><!-- #report -->
 </main>
+
+<!-- Custom tooltip for Gantt timeline -->
+<div id="timeline-tooltip"></div>
 
 <script>
 /* ================================================================
@@ -475,12 +538,16 @@ const STATE_COLORS = {
   33: '#a78bfa', 34: '#c4b5fd', 35: '#ef4444', 36: '#ef4444'
 };
 
+// Reverse lookup: state name (lowercase) → numeric id
+const STATE_NAMES_REVERSE = Object.fromEntries(
+  Object.entries(STATE_NAMES).map(([k, v]) => [v.toLowerCase(), Number(k)])
+);
+
 // ── GLOBALS ────────────────────────────────────────────────────
 let anomalyData = [];
 let sessionData = [];
 let bootEventData = [];
 let gapData = [];
-let timelineChartInstances = [];
 
 // ── DRAG & DROP / FILE INPUT ────────────────────────────────────
 const uploadZone = document.getElementById('upload-zone');
@@ -548,12 +615,17 @@ function processFile(file) {
         renderHistoryDashboard();
         const colNames = rows.length > 0 ? Object.keys(rows[0]).join(', ') : 'ninguna';
         alert(
-          `No se encontraron mensajes del topic "processes/modulator".\n\n` +
+          `No se encontraron mensajes con el campo "state" en ningún topic.\n\n` +
           `Filas totales en el Excel: ${rows.length}\n` +
           `Columnas detectadas: ${colNames}\n\n` +
+          `El analizador acepta cualquier topic cuyo payload JSON contenga\n` +
+          `un campo "state" (en payload.state, payload.data.state,\n` +
+          `payload.data.elements[].state, payload.data.connectors[].state, etc.).\n\n` +
           `Comprueba que:\n` +
+          `1. El Excel tenga las columnas: Fecha/Hora, Topic, Mensaje\n` +
+          `2. La columna "Mensaje" contenga JSON con un campo "state"\n` +
           `1. El Excel tenga las columnas: Fecha/Hora, Comando, Topic, Mensaje\n` +
-          `2. La columna "Topic" contenga la cadena "processes/modulator"\n` +
+          `2. La columna "Mensaje" contenga JSON con el campo "state" (en cualquier topic)\n` +
           `3. El fichero no esté vacío o sea la hoja correcta`
         );
         return;
@@ -611,7 +683,149 @@ function analyzeLog(rows) {
     const topic     = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
     const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
 
-    if (!topic.includes('processes/modulator')) return;
+    if (!topic.includes('processes/modulator')) {
+      // === NON-MODULATOR FALLBACK: scan any topic for a 'state' field ===
+      const payloadFb = parseMessagePayload(msgStr);
+      if (!payloadFb) return;
+
+      // Extract elements with a 'state' field from any location in the payload
+      const stateElements = extractStateElements(payloadFb);
+      if (stateElements.length === 0) return;
+
+      const chargerId = extractChargerId(topic);
+      if (chargerId) chargerIds.add(chargerId);
+
+      const ts = parseTimestamp(fechaHora);
+      if (ts) {
+        if (ts < minTs) minTs = ts;
+        if (ts > maxTs) maxTs = ts;
+      }
+
+      processedCount++;
+
+      stateElements.forEach(el => {
+        const connId   = Number(el.connectorId ?? 0);
+        const connName = el.connectorName || `Conector ${connId}`;
+
+        // Handle state as number or string name
+        let state = el.state;
+        if (typeof state === 'string') {
+          const found = Object.entries(STATE_NAMES).find(([, v]) => v.toLowerCase() === state.toLowerCase());
+          state = found ? Number(found[0]) : NaN;
+        }
+        state = Number(state);
+        if (el.state === undefined || el.state === null || isNaN(state)) return;
+
+        const connKey = `${chargerId}:${connId}`;
+        connectorIds.add(connKey);
+
+        // ── Timeline data ──
+        if (!timelineData[connKey]) timelineData[connKey] = [];
+        timelineData[connKey].push({ ts, state, label: fechaHora });
+
+        // ── State machine ──
+        if (!connectorState[connKey]) {
+          connectorState[connKey] = {
+            lastState: state, lastTs: ts,
+            inCharging: false, chargingStart: null, chargingEnergy: 0,
+            chargingLastActive: 0, sessionAnomalous: false,
+            charger: chargerId, connName, connId,
+            sessionStartTs: null, lastActive: 0,
+            _activeDivisor: 1, lastChargeEnergy: null
+          };
+          if (CHARGING_STATES.has(state)) {
+            connectorState[connKey].inCharging = true;
+            connectorState[connKey].chargingStart = ts;
+            connectorState[connKey].sessionStartTs = ts;
+          }
+          return;
+        }
+
+        const cs = connectorState[connKey];
+        const prevState = cs.lastState;
+
+        // ── Anomaly 1: Error states ──
+        if (ERROR_STATES.has(state) && !ERROR_STATES.has(prevState)) {
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'ERROR_CRITICO',
+            desc: `Estado de error detectado: ${STATE_NAMES[state] || state}`
+          });
+          if (cs.inCharging) cs.sessionAnomalous = true;
+        }
+
+        // ── Anomaly 2: Invalid transition ──
+        if (prevState !== state && !isValidTransition(prevState, state)) {
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'TRANSICION_INVALIDA',
+            desc: `Transición no permitida: ${STATE_NAMES[prevState] ?? prevState} → ${STATE_NAMES[state] ?? state}`
+          });
+          if (cs.inCharging) cs.sessionAnomalous = true;
+        }
+
+        // ── Anomaly 3: Off/Inoperative during charging ──
+        if ((state === 31 || state === 32) && cs.inCharging) {
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: connName,
+            prevState, newState: state,
+            type: 'ADVERTENCIA',
+            desc: `${STATE_NAMES[state]} detectado durante sesión de carga activa`
+          });
+          cs.sessionAnomalous = true;
+        }
+
+        // ── Session tracking ──
+        const wasCharging = CHARGING_STATES.has(prevState);
+        const isCharging  = CHARGING_STATES.has(state);
+
+        if (!wasCharging && isCharging) {
+          cs.inCharging = true;
+          cs.chargingStart = ts;
+          cs.sessionStartTs = ts;
+          cs.chargingEnergy = 0;
+          cs.sessionAnomalous = false;
+        }
+
+        if (wasCharging && !isCharging && cs.inCharging) {
+          cs.inCharging = false;
+          const durMs  = (ts && cs.chargingStart) ? ts - cs.chargingStart : 0;
+          const durSec = durMs / 1000;
+          let anomalous = cs.sessionAnomalous;
+
+          if (durSec > 0 && durSec < 60) {
+            anomalous = true;
+            anomalies.push({
+              ts: fechaHora, tsRaw: ts,
+              charger: chargerId, connector: connName,
+              prevState, newState: state,
+              type: 'SESION_CORTA',
+              desc: `Sesión de carga demasiado corta: ${Math.round(durSec)}s (< 60s)`
+            });
+          }
+
+          sessions.push({
+            charger: chargerId, connector: connName,
+            start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
+            end: ts, endLabel: tsToLabel(ts),
+            durationSec: durSec, energy: 0, anomalous
+          });
+          cs.chargingStart = null;
+          cs.sessionAnomalous = false;
+        }
+
+        cs.lastState = state;
+        cs.lastTs    = ts;
+      });
+      return; // end non-modulator path
+    }
+
+    // === MODULATOR PATH (unchanged) ===
     processedCount++;
 
     // Extract charger ID
@@ -625,26 +839,10 @@ function analyzeLog(rows) {
       if (ts > maxTs) maxTs = ts;
     }
 
-    // Parse payload
-    let payload;
-    try {
-      let raw = msgStr;
-      if (typeof raw === 'object' && raw !== null) {
-        payload = raw;
-      } else {
-        raw = String(raw).trim();
-        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-        // Intentar parseo directo
-        try {
-          payload = JSON.parse(raw);
-        } catch {
-          // Algunos Excel exportan el JSON con comillas escapadas: {\"data\":...}
-          // Se reemplaza \" → " para obtener JSON válido y se vuelve a intentar
-          payload = JSON.parse(raw.replace(/\\"/g, '"'));
-        }
-      }
-    } catch (parseErr) {
-      console.warn(`[Row ${idx}] Error al parsear Mensaje:`, parseErr.message, '| Valor:', msgStr?.toString().substring(0, 100));
+    // Parse payload using shared helper
+    const payload = parseMessagePayload(msgStr);
+    if (!payload) {
+      console.warn(`[Row ${idx}] Error al parsear Mensaje: | Valor:`, msgStr?.toString().substring(0, 100));
       return;
     }
     // Diagnostic logs for first modulator row
@@ -833,6 +1031,170 @@ function analyzeLog(rows) {
     });
   });
 
+  // ── SECOND PASS: Universal state detection for non-modulator topics ──
+  rows.forEach((row, idx) => {
+    const fechaHora = getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') ?? '';
+    const topic     = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
+    const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
+
+    // Already handled by the modulator-specific pass above
+    if (topic.includes('processes/modulator')) return;
+
+    // Parse payload
+    let payload;
+    try {
+      let raw = msgStr;
+      if (typeof raw === 'object' && raw !== null) {
+        payload = raw;
+      } else {
+        raw = String(raw).trim();
+        if (!raw) return;
+        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+        try { payload = JSON.parse(raw); } catch { payload = JSON.parse(raw.replace(/\\"/g, '"')); }
+      }
+    } catch { return; }
+
+    if (!payload || typeof payload !== 'object') return;
+
+    const chargerId = extractChargerId(topic);
+    const ts = parseTimestamp(fechaHora);
+    if (ts) {
+      if (ts < minTs) minTs = ts;
+      if (ts > maxTs) maxTs = ts;
+    }
+    if (chargerId) chargerIds.add(chargerId);
+
+    // Collect state events: [{state, connId, connName}]
+    const stateEvents = [];
+
+    if (payload.state !== undefined) {
+      stateEvents.push({ state: resolveState(payload.state), connId: 0, connName: 'Principal' });
+    }
+    if (payload.data && typeof payload.data === 'object') {
+      if (payload.data.state !== undefined) {
+        stateEvents.push({ state: resolveState(payload.data.state), connId: 0, connName: 'Principal' });
+      }
+      // Check all arrays inside data for items with a state field
+      Object.values(payload.data).forEach(arr => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach(el => {
+          if (!el || el.state === undefined) return;
+          const connId   = (el.connectorId !== undefined) ? Number(el.connectorId) : 0;
+          const connName = el.connectorName || `Conector ${connId}`;
+          stateEvents.push({ state: resolveState(el.state), connId, connName });
+        });
+      });
+    }
+
+    let rowHadState = false;
+    stateEvents.forEach(({ state, connId, connName }) => {
+      if (isNaN(state)) return;
+
+      if (!rowHadState) { processedCount++; rowHadState = true; }
+
+      const connKey = `${chargerId}:${connId}`;
+      connectorIds.add(connKey);
+
+      if (ts) {
+        if (!timelineData[connKey]) timelineData[connKey] = [];
+        timelineData[connKey].push({ ts, state, label: fechaHora });
+      }
+
+      if (!connectorState[connKey]) {
+        connectorState[connKey] = {
+          lastState: state, lastTs: ts,
+          inCharging: CHARGING_STATES.has(state),
+          chargingStart: CHARGING_STATES.has(state) ? ts : null,
+          chargingEnergy: 0, chargingLastActive: 0,
+          sessionAnomalous: false,
+          charger: chargerId, connName, connId,
+          sessionStartTs: CHARGING_STATES.has(state) ? ts : null,
+          lastActive: 0, _activeDivisor: 1, lastChargeEnergy: null
+        };
+        return;
+      }
+
+      const cs = connectorState[connKey];
+      const prevState = cs.lastState;
+
+      // Anomaly 1: Error states
+      if (ERROR_STATES.has(state) && !ERROR_STATES.has(prevState)) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: cs.connName,
+          prevState, newState: state,
+          type: 'ERROR_CRITICO',
+          desc: `Estado de error detectado: ${STATE_NAMES[state] || state}`
+        });
+        if (cs.inCharging) cs.sessionAnomalous = true;
+      }
+
+      // Anomaly 3: Invalid transition
+      if (prevState !== state && !isValidTransition(prevState, state)) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: cs.connName,
+          prevState, newState: state,
+          type: 'TRANSICION_INVALIDA',
+          desc: `Transición no permitida: ${STATE_NAMES[prevState] ?? prevState} → ${STATE_NAMES[state] ?? state}`
+        });
+        if (cs.inCharging) cs.sessionAnomalous = true;
+      }
+
+      // Anomaly 4: Off/Inoperative during charging
+      if ((state === 31 || state === 32) && cs.inCharging) {
+        anomalies.push({
+          ts: fechaHora, tsRaw: ts,
+          charger: chargerId, connector: cs.connName,
+          prevState, newState: state,
+          type: 'ADVERTENCIA',
+          desc: `${STATE_NAMES[state]} detectado durante sesión de carga activa`
+        });
+        cs.sessionAnomalous = true;
+      }
+
+      // Session tracking
+      const wasCharging = CHARGING_STATES.has(prevState);
+      const isCharging  = CHARGING_STATES.has(state);
+
+      if (!wasCharging && isCharging) {
+        cs.inCharging = true;
+        cs.chargingStart = ts;
+        cs.sessionStartTs = ts;
+        cs.chargingEnergy = 0;
+        cs.sessionAnomalous = false;
+      }
+
+      if (wasCharging && !isCharging && cs.inCharging) {
+        cs.inCharging = false;
+        const durMs  = (ts && cs.chargingStart) ? ts - cs.chargingStart : 0;
+        const durSec = durMs / 1000;
+        let anomalous = cs.sessionAnomalous;
+        if (durSec > 0 && durSec < 60) {
+          anomalous = true;
+          anomalies.push({
+            ts: fechaHora, tsRaw: ts,
+            charger: chargerId, connector: cs.connName,
+            prevState, newState: state,
+            type: 'SESION_CORTA',
+            desc: `Sesión de carga demasiado corta: ${Math.round(durSec)}s (< 60s)`
+          });
+        }
+        sessions.push({
+          charger: chargerId, connector: cs.connName,
+          start: cs.chargingStart, startLabel: tsToLabel(cs.chargingStart),
+          end: ts, endLabel: tsToLabel(ts),
+          durationSec: durSec, energy: 0, anomalous
+        });
+        cs.chargingStart  = null;
+        cs.sessionAnomalous = false;
+      }
+
+      cs.lastState = state;
+      cs.lastTs    = ts;
+    });
+  });
+
   // Close any open sessions at end of log
   Object.values(connectorState).forEach(cs => {
     if (cs.inCharging && cs.chargingStart) {
@@ -864,14 +1226,19 @@ function analyzeLog(rows) {
 
   // ── BOOT / INIT EVENT DETECTION ──────────────────────────────
   const bootEvents = [];
+  let graveResetCount = 0;
   rows.forEach((row, idx) => {
-    const topic = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
-    const topicLower = topic.toLowerCase();
-    if (!topicLower.includes('init') && !topicLower.includes('boot')) return;
-
-    const chargerId = extractChargerId(topic);
+    const topic  = String(getCol(row, 'Topic', 'topic', 'TOPIC') || '');
     const fechaHora = getCol(row, 'Fecha/Hora', 'fecha/hora', 'Fecha_Hora', 'fecha_hora', 'FechaHora', 'fechahora') ?? '';
-    const msgStr    = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
+    const msgStr = getCol(row, 'Mensaje', 'mensaje', 'MENSAJE', 'Message', 'message') ?? '';
+
+    if (!topic.toLowerCase().includes('init_boot/sys') && !topic.toLowerCase().includes('init_boot')) return;
+
+    // Extract charger ID (EVVC segment)
+    const topicParts = topic.split('/');
+    const chargerId = topicParts.find(p => p.startsWith('EVVC')) || topicParts[2] || 'Desconocido';
+    const deviceId  = topicParts[2] || '—';
+    const cmd       = topicParts[3] || '—';
 
     let payload = null;
     try {
@@ -885,20 +1252,31 @@ function analyzeLog(rows) {
       }
     } catch { payload = null; }
 
-    let rstReason = undefined;
-    if (payload) {
-      if (payload.rst_reason !== undefined)        rstReason = payload.rst_reason;
-      else if (payload.data?.rst_reason !== undefined)   rstReason = payload.data.rst_reason;
-      else if (payload.header?.rst_reason !== undefined) rstReason = payload.header.rst_reason;
-    }
+    const rstReason =
+      payload?.rst_reason ??
+      payload?.data?.rst_reason ??
+      payload?.header?.rst_reason ??
+      null;
 
-    const isEmpty = rstReason === undefined || rstReason === null || rstReason === '' || rstReason === 0;
+    const rstVerbose =
+      payload?.rst_reason_verbose ??
+      payload?.data?.rst_reason_verbose ??
+      payload?.header?.rst_reason_verbose ??
+      null;
+
+    const { label: rstLabel, severity, badgeCls } = classifyRstReason(rstReason, rstVerbose);
+    if (severity === 'Grave') graveResetCount++;
+
     bootEvents.push({
       ts: fechaHora,
       tsRaw: parseTimestamp(fechaHora),
-      chargerId,
-      rstReason,
-      severity: isEmpty ? 'connectivity' : 'grave'
+      charger: chargerId,
+      deviceId,
+      cmd,
+      rstReason: rstReason ?? '—',
+      rstLabel,
+      severity,
+      badgeCls
     });
   });
 
@@ -942,6 +1320,7 @@ function analyzeLog(rows) {
     anomalies,
     sessions,
     bootEvents,
+    graveResetCount,
     connectivityGaps,
     timelineData,
     connectorState
@@ -949,9 +1328,86 @@ function analyzeLog(rows) {
 }
 
 // ── HELPERS ────────────────────────────────────────────────────
+function classifyRstReason(value, verbose) {
+  if (verbose) return { label: verbose, severity: 'Grave', badgeCls: 'badge-danger' };
+  const RST_MAP = {
+    0:  { label: 'Arranque normal',                    severity: 'Normal', badgeCls: 'badge-muted'   },
+    1:  { label: 'Warm reset SW',                      severity: 'Leve',   badgeCls: 'badge-info'    },
+    2:  { label: 'Reset por excepción',                severity: 'Grave',  badgeCls: 'badge-danger'  },
+    3:  { label: 'Reset por watchdog',                 severity: 'Grave',  badgeCls: 'badge-danger'  },
+    4:  { label: 'Reset por fallo en deep sleep',      severity: 'Leve',   badgeCls: 'badge-warning' },
+    5:  { label: 'Reset brownout (bajada de tensión)', severity: 'Grave',  badgeCls: 'badge-danger'  },
+    6:  { label: 'Reset por SDIO',                     severity: 'Leve',   badgeCls: 'badge-warning' },
+    7:  { label: 'Reset por alarma de deepsleep',      severity: 'Normal', badgeCls: 'badge-muted'   },
+  };
+  const v = value;
+  if (v === undefined || v === null || v === '' || v === 0) return RST_MAP[0];
+  const n = Number(v);
+  if (!isNaN(n) && RST_MAP[n]) return RST_MAP[n];
+  if (!isNaN(n)) return { label: `rst_reason=${n}`, severity: 'Grave', badgeCls: 'badge-danger' };
+  return { label: String(v), severity: 'Grave', badgeCls: 'badge-danger' };
+}
+
 function extractChargerId(topic) {
   const parts = topic.split('/');
   return parts.find(p => p.startsWith('EVVC')) || 'Desconocido';
+}
+
+// ── SHARED JSON PAYLOAD PARSER ────────────────────────────────────
+// Parses a Mensaje field (string or already-parsed object) into an object.
+// Returns null if parsing fails (caller should skip the row).
+// Handles BOM, escaped quotes produced by some Excel exports, and raw objects.
+function parseMessagePayload(msgStr) {
+  try {
+    if (typeof msgStr === 'object' && msgStr !== null) return msgStr;
+    let raw = String(msgStr).trim();
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // strip BOM
+    try {
+      return JSON.parse(raw);
+    } catch {
+      // Some Excel exports produce escaped quotes: {\"data\":...} → retry after unescape
+      return JSON.parse(raw.replace(/\\"/g, '"'));
+    }
+  } catch {
+    return null;
+  }
+}
+
+// ── EXTRACT STATE ELEMENTS FROM ANY PAYLOAD ─────────────────────
+// Searches for items with a 'state' field in:
+//   payload.state (scalar)
+//   payload.data.state (scalar)
+//   payload.data.elements[*] / connectors[*] / slots[*]
+//   any other array inside payload.data with items that have .state
+function extractStateElements(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+
+  // Case 1: direct state at payload root
+  if (payload.state !== undefined) {
+    return [{ state: payload.state, connectorId: 0, connectorName: 'Conector 0', now: payload.now }];
+  }
+
+  const data = payload.data;
+  if (data === undefined || data === null) return [];
+
+  // Case 2: payload.data.state (scalar)
+  if (data.state !== undefined) {
+    return [{ state: data.state, connectorId: 0, connectorName: 'Conector 0', now: data.now }];
+  }
+
+  // Case 3: known array keys (elements, connectors, slots) then any array with state items
+  const checkKeys = ['elements', 'connectors', 'slots', ...Object.keys(data)];
+  const seen = new Set();
+  for (const k of checkKeys) {
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const v = data[k];
+    if (Array.isArray(v) && v.length > 0 && v[0]?.state !== undefined) {
+      return v.filter(el => el != null && el.state !== undefined);
+    }
+  }
+
+  return [];
 }
 
 function parseTimestamp(str) {
@@ -989,6 +1445,16 @@ function formatDuration(sec) {
   return `${s}s`;
 }
 
+function resolveState(val) {
+  if (val === undefined || val === null) return NaN;
+  if (typeof val === 'string') {
+    const n = STATE_NAMES_REVERSE[val.toLowerCase()];
+    return (n !== undefined) ? n : NaN;
+  }
+  const n = Number(val);
+  return isNaN(n) ? NaN : n;
+}
+
 // ── RENDER REPORT ──────────────────────────────────────────────
 function renderReport(result) {
   anomalyData  = result.anomalies;
@@ -1020,18 +1486,17 @@ function renderReport(result) {
   const invalid           = result.anomalies.filter(a => a.type === 'TRANSICION_INVALIDA').length;
   const shortSessionCount = result.anomalies.filter(a => a.type === 'SESION_CORTA').length;
   const warns             = result.anomalies.filter(a => a.type === 'ADVERTENCIA').length;
-  const bootGraves        = bootEventData.filter(b => b.severity === 'grave').length;
   const gapCount          = gapData.length;
   const cardsData = [
-    { value: result.processedCount,     label: 'Mensajes procesados',   cls: 'info'    },
+    { value: result.processedCount,      label: 'Mensajes procesados',  cls: 'info'    },
     { value: result.connectorIds.length, label: 'Conectores',           cls: 'info'    },
-    { value: result.sessions.length,    label: 'Sesiones detectadas',   cls: 'success' },
-    { value: critical,                  label: 'Errores críticos',      cls: 'danger'  },
-    { value: invalid,                   label: 'Trans. inválidas',      cls: 'warning' },
-    { value: shortSessionCount,         label: 'Sesiones cortas',       cls: 'info'    },
-    { value: warns,                     label: 'Advertencias',          cls: 'success' },
-    { value: bootGraves,                label: 'Boot resets graves',    cls: 'warning' },
-    { value: gapCount,                  label: 'Gaps de conectividad',  cls: 'info'    }
+    { value: result.sessions.length,     label: 'Sesiones detectadas',  cls: 'success' },
+    { value: critical,                   label: 'Errores críticos',     cls: 'danger'  },
+    { value: invalid,                    label: 'Trans. inválidas',     cls: 'warning' },
+    { value: shortSessionCount,          label: 'Sesiones cortas',      cls: 'info'    },
+    { value: warns,                      label: 'Advertencias',         cls: 'success' },
+    { value: result.graveResetCount || 0, label: 'Resets graves',      cls: 'danger'  },
+    { value: gapCount,                   label: 'Gaps de conectividad', cls: 'info'    }
   ];
   const cardsEl = document.getElementById('summary-cards');
   cardsEl.innerHTML = '';
@@ -1055,140 +1520,305 @@ function renderReport(result) {
   renderSessionsTable();
 
   // 6. Boot events table
-  renderBootEventsTable();
+  renderBootEventsTable(result.bootEvents || []);
+  document.getElementById('boot-events-section').style.display =
+    (result.bootEvents && result.bootEvents.length > 0) ? '' : 'none';
 
   // 7. Gaps table
   renderGapsTable();
 }
 
-// ── TIMELINE ───────────────────────────────────────────────────
+// ── TIMELINE (Gantt swimlane — pure CSS/HTML, no Chart.js) ─────
 function renderTimelines(result) {
-  // Destroy previous charts
-  timelineChartInstances.forEach(c => c.destroy());
-  timelineChartInstances = [];
-
   const container = document.getElementById('timeline-charts');
   container.innerHTML = '';
+
+  const visibleKeys = (result.connectorIds || []).filter(k => (result.timelineData[k] || []).length > 0);
+  if (visibleKeys.length === 0) {
+  if (!result.connectorIds || result.connectorIds.length === 0) {
+    container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No hay datos de timeline disponibles.</p>';
+    return;
+  }
+
+  const minTs   = result.minTs === Infinity  ? 0 : result.minTs;
+  const maxTs   = result.maxTs === -Infinity ? 0 : result.maxTs;
+  const totalMs = (maxTs - minTs) || 1;
+  const TAIL_MS = 30000; // 30 s extension for the last segment
+
+  // Collect all states that actually appear (for the legend)
+  const appearingStates = new Set();
+
+  // ── Build swimlane rows ────────────────────────────────────────
+  const rowsHtml = visibleKeys.map(connKey => {
+    const data = result.timelineData[connKey] || [];
+    const cs   = result.connectorState[connKey];
+    const connLabel = `${connKey.split(':')[0]} — ${cs?.connName || connKey.split(':')[1]}`;
+
+    const chargerForKey = connKey.split(':')[0];
+    const chargerGaps   = (result.connectivityGaps || []).filter(g => g.chargerId === chargerForKey);
+
+    // Build state blocks
+    const blocksHtml = data.map((pt, i) => {
+      const startMs = pt.ts;
+      const endMs   = i + 1 < data.length ? data[i + 1].ts : (startMs != null ? startMs + TAIL_MS : null);
+      if (startMs == null || endMs == null || endMs <= startMs) return '';
+
+      const state     = pt.state;
+      const stateName = STATE_NAMES[state] ?? `Estado ${state}`;
+      const color     = STATE_COLORS[state] || '#cbd5e1';
+      const leftPct   = ((startMs - minTs) / totalMs * 100).toFixed(4);
+      const widthPct  = ((endMs - startMs) / totalMs * 100).toFixed(4);
+
+      appearingStates.add(state);
+
+      // Encode tooltip data into individual data-* attributes (safe, state is always a number)
+      return `<div class="tl-block"
+        style="left:${leftPct}%;width:${widthPct}%;background:${color};"
+        data-state="${escHtml(String(state))}"
+        data-state-name="${escHtml(stateName)}"
+        data-start="${escHtml(tsToLabel(startMs))}"
+        data-end="${escHtml(tsToLabel(endMs))}"
+        data-dur="${escHtml(String(((endMs - startMs) / 1000).toFixed(0)))}"
+      >${Number(widthPct) > 2 ? `<span>${escHtml(stateName)}</span>` : ''}</div>`;
+    }).join('');
+
+    // Gap overlays (red translucent bands)
+    const gapsHtml = chargerGaps.map(g => {
+      const leftPct  = ((g.gapStart - minTs) / totalMs * 100).toFixed(4);
+      const widthPct = ((g.gapEnd - g.gapStart) / totalMs * 100).toFixed(4);
+      return `<div style="position:absolute;left:${leftPct}%;width:${widthPct}%;height:100%;
+        background:rgba(239,68,68,.22);border:1px solid rgba(239,68,68,.5);
+        box-sizing:border-box;z-index:2;pointer-events:none;"
+        title="Gap de conectividad: ${escHtml(formatDuration(g.durationSec))}"></div>`;
+    }).join('');
+
+    return `<div class="tl-row">
+      <div class="tl-label" title="${escHtml(connLabel)}">${escHtml(connLabel)}</div>
+      <div class="tl-track" style="overflow-x:hidden;">${blocksHtml}${gapsHtml}</div>
+    </div>`;
+  }).join('');
+
+  // ── Time axis ─────────────────────────────────────────────────
+  const ticks    = buildTimeTicks(minTs, maxTs, 8);
+  const ticksHtml = ticks.map(t => {
+    const pct   = ((t - minTs) / totalMs * 100).toFixed(3);
+    const label = tsToAxisLabel(t);
+    return `<span class="tl-tick" style="left:${pct}%">${escHtml(label)}</span>`;
+  }).join('');
+
+  // ── Colour legend ─────────────────────────────────────────────
+  const legendItemsHtml = [...appearingStates].sort((a, b) => a - b).map(s => {
+    const name  = STATE_NAMES[s] ?? `Estado ${s}`;
+    const color = STATE_COLORS[s] || '#cbd5e1';
+    return `<span class="tl-legend-item">
+      <span class="tl-legend-swatch" style="background:${color};"></span>${escHtml(name)}
+    </span>`;
+  }).join('');
+
+  // ── Assemble HTML ─────────────────────────────────────────────
+  container.innerHTML = `
+    <div style="overflow-x:auto;">
+      <div style="min-width:600px;">
+        ${rowsHtml}
+        <div class="tl-axis">
+          <div class="tl-axis-spacer"></div>
+          <div class="tl-axis-area">${ticksHtml}</div>
+        </div>
+        <div class="tl-legend">
+          <span class="tl-legend-label">Leyenda:</span>
+          ${legendItemsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // ── Tooltip via event delegation on container ─────────────────
+  container.addEventListener('mousemove', handleTlTooltip);
+  container.addEventListener('mouseleave', hideTimelineTip);
+}
+
+// ── TIMELINE TOOLTIP HELPERS ───────────────────────────────────
+function handleTlTooltip(e) {
+  const block = e.target.closest('.tl-block');
+  if (!block) { hideTimelineTip(); return; }
+  const tip = document.getElementById('timeline-tooltip');
+  const stateName = block.dataset.stateName;
+  const state     = block.dataset.state;
+  const start     = block.dataset.start;
+  const end       = block.dataset.end;
+  const durSec    = Number(block.dataset.dur);
+  tip.innerHTML = `
+    <strong>${escHtml(stateName)}</strong> <span style="opacity:.7">(id: ${escHtml(state)})</span><br>
+    <span>🕐 Inicio: ${escHtml(start)}</span><br>
+    <span>🕑 Fin: &nbsp;&nbsp;${escHtml(end)}</span><br>
+    <span>⏱ Duración: ${escHtml(formatDuration(durSec))}</span>
+  `;
+  tip.style.display = 'block';
+  positionTip(e);
+}
+
+function positionTip(e) {
+  const tip = document.getElementById('timeline-tooltip');
+  if (!tip || tip.style.display === 'none') return;
+  const x  = e.clientX + 16;
+  const y  = e.clientY - 12;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const tw = tip.offsetWidth  || 240;
+  const th = tip.offsetHeight || 80;
+  tip.style.left = (x + tw > vw ? vw - tw - 8 : x) + 'px';
+  tip.style.top  = (y + th > vh ? vh - th - 8 : y) + 'px';
+}
+
+function hideTimelineTip() {
+  const tip = document.getElementById('timeline-tooltip');
+  if (tip) tip.style.display = 'none';
+}
+
+// ── BUILD TIME AXIS TICKS ──────────────────────────────────────
+function buildTimeTicks(minTs, maxTs, count) {
+  if (minTs === maxTs) return [minTs];
+  const ticks = [];
+  for (let i = 0; i <= count; i++) {
+    ticks.push(minTs + (maxTs - minTs) * i / count);
+  const minTs   = result.minTs;
+  const maxTs   = result.maxTs;
+  const totalMs = maxTs - minTs;
+  if (!totalMs || totalMs <= 0) return;
+
+  // Ensure tooltip div exists
+  let tooltip = document.getElementById('tl-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'tl-tooltip';
+    document.body.appendChild(tooltip);
+  }
+
+  // Track which states appear for legend
+  const seenStates = new Set();
+
+  const inner = document.createElement('div');
+  inner.className = 'tl-inner';
 
   result.connectorIds.forEach(connKey => {
     const data = result.timelineData[connKey] || [];
     if (data.length === 0) return;
-
     const cs = result.connectorState[connKey];
-    const label = `${connKey.split(':')[0]} — ${cs?.connName || connKey.split(':')[1]}`;
+    const [chargerId, connectorId] = connKey.split(':');
+    const labelText = `${chargerId} — ${cs?.connName || ('Conector ' + connectorId)}`;
 
-    const wrap = document.createElement('div');
-    wrap.className = 'timeline-connector';
-    wrap.innerHTML = `<h3>${label}</h3><div class="timeline-canvas-wrap"><canvas></canvas></div>`;
-    container.appendChild(wrap);
-    const canvas = wrap.querySelector('canvas');
-
-    // Build bar chart segments: each row = 1 segment, x = timestamp, bar width = 1 unit time
-    // Use Chart.js bar chart with time scale
-    const TIMELINE_TAIL_MS = 30000; // 30s extension for the last segment
-
-    // Use floating bars: each point covers [ts, nextTs]
-    const floatData = [];
+    // Build float segments
+    const segs = [];
+    const TAIL_MS = 30000;
     for (let i = 0; i < data.length; i++) {
       const startMs = data[i].ts;
-      let endMs;
-      if (i + 1 < data.length) {
-        endMs = data[i + 1].ts;
-      } else if (startMs != null) {
-        endMs = startMs + TIMELINE_TAIL_MS;
-      } else {
-        endMs = null;
-      }
-      if (startMs == null || endMs == null) continue;
-      floatData.push({
-        x: [startMs, endMs],
-        state: data[i].state,
-        label: data[i].label
-      });
+      const endMs   = (i + 1 < data.length) ? data[i + 1].ts : startMs + TAIL_MS;
+      if (startMs == null || endMs == null || endMs <= startMs) continue;
+      segs.push({ startMs, endMs, state: data[i].state, label: data[i].label });
+      seenStates.add(data[i].state);
     }
 
-    // Gaps for this charger as overlay dataset
-    const chargerForKey = connKey.split(':')[0];
-    const chargerGaps = (result.connectivityGaps || []).filter(g => g.chargerId === chargerForKey);
-    const gapFloatData = chargerGaps.map(g => ({ x: [g.gapStart, g.gapEnd], label: `Gap: ${formatDuration(g.durationSec)}` }));
+    const row = document.createElement('div');
+    row.className = 'tl-row';
 
-    const datasets = [
-      {
-        data: floatData.map(d => ({ x: d.x, y: 1 })),
-        backgroundColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
-        borderColor: floatData.map(d => STATE_COLORS[d.state] || '#cbd5e1'),
-        borderWidth: 0,
-        borderRadius: 2
-      }
-    ];
-    if (gapFloatData.length > 0) {
-      datasets.push({
-        data: gapFloatData.map(d => ({ x: d.x, y: 1 })),
-        backgroundColor: 'rgba(239,68,68,0.25)',
-        borderColor: 'rgba(239,68,68,0.5)',
-        borderWidth: 1,
-        borderRadius: 0,
-        _gapData: gapFloatData
+    const lbl = document.createElement('div');
+    lbl.className = 'tl-label';
+    lbl.title = labelText;
+    lbl.textContent = labelText;
+
+    const track = document.createElement('div');
+    track.className = 'tl-track';
+
+    segs.forEach(seg => {
+      const pctLeft  = ((seg.startMs - minTs) / totalMs) * 100;
+      const pctWidth = ((seg.endMs - seg.startMs) / totalMs) * 100;
+      const color = STATE_COLORS[seg.state] || '#cbd5e1';
+      const name  = STATE_NAMES[seg.state]  || `Estado ${seg.state}`;
+
+      const block = document.createElement('div');
+      block.className = 'tl-seg';
+      block.style.left = pctLeft + '%';
+      block.style.width = pctWidth + '%';
+      block.style.background = color;
+
+      const innerLabel = document.createElement('span');
+      innerLabel.className = 'tl-seg-label';
+      innerLabel.textContent = name;
+      block.appendChild(innerLabel);
+
+      block.addEventListener('mouseenter', () => {
+        const dur = seg.endMs - seg.startMs;
+        tooltip.innerHTML =
+          `<strong>${escHtml(name)}</strong> <span style="opacity:.6">(${escHtml(String(seg.state))})</span><br>` +
+          `Inicio: ${escHtml(tsToLabel(seg.startMs))}<br>` +
+          `Fin: ${escHtml(tsToLabel(seg.endMs))}<br>` +
+          `Duración: ${escHtml(formatDuration(dur / 1000))}`;
+        tooltip.style.display = 'block';
       });
-    }
+      block.addEventListener('mousemove', e => {
+        tooltip.style.left = (e.clientX + 14) + 'px';
+        tooltip.style.top  = (e.clientY - 10) + 'px';
+      });
+      block.addEventListener('mouseleave', () => {
+        tooltip.style.display = 'none';
+      });
 
-    const chart = new Chart(canvas, {
-      type: 'bar',
-      data: { datasets },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              title: items => {
-                const dsIdx = items[0].datasetIndex;
-                const idx   = items[0].dataIndex;
-                if (dsIdx === 0) return (idx < floatData.length ? floatData[idx]?.label : null) || '';
-                return (idx < gapFloatData.length ? gapFloatData[idx]?.label : null) || 'Gap de conectividad';
-              },
-              label: items => {
-                const dsIdx = items.datasetIndex;
-                const idx   = items.dataIndex;
-                if (dsIdx === 0) {
-                  const state = idx < floatData.length ? floatData[idx]?.state : undefined;
-                  return `Estado: ${STATE_NAMES[state] ?? state}`;
-                }
-                return 'Pérdida de conectividad';
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            type: 'linear',
-            min: data[0]?.ts,
-            max: data[data.length - 1]?.ts,
-            ticks: {
-              callback: v => {
-                const d = new Date(v);
-                return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-              },
-              maxTicksLimit: 8,
-              font: { size: 10 }
-            },
-            grid: { color: '#f1f5f9' }
-          },
-          y: {
-            display: false
-          }
-        }
-      }
+      track.appendChild(block);
     });
-    timelineChartInstances.push(chart);
+
+    row.appendChild(lbl);
+    row.appendChild(track);
+    inner.appendChild(row);
   });
+
+  // Time axis
+  const axis = document.createElement('div');
+  axis.className = 'tl-axis';
+  const TICKS = 8;
+  for (let i = 0; i <= TICKS; i++) {
+    const frac = i / TICKS;
+    const ts   = minTs + frac * totalMs;
+    const tick = document.createElement('div');
+    tick.className = 'tl-tick';
+    tick.style.left = (frac * 100) + '%';
+    tick.textContent = new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    axis.appendChild(tick);
+  }
+  inner.appendChild(axis);
+
+  // Legend
+  const legend = document.createElement('div');
+  legend.className = 'tl-legend';
+  [...seenStates].sort((a, b) => a - b).forEach(state => {
+    const item = document.createElement('div');
+    item.className = 'tl-legend-item';
+    const dot = document.createElement('div');
+    dot.className = 'tl-legend-dot';
+    dot.style.background = STATE_COLORS[state] || '#cbd5e1';
+    const name = document.createElement('span');
+    name.textContent = `${STATE_NAMES[state] || state} (${state})`;
+    item.appendChild(dot);
+    item.appendChild(name);
+    legend.appendChild(item);
+  });
+  inner.appendChild(legend);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'tl-wrap';
+  wrap.appendChild(inner);
+  container.appendChild(wrap);
 
   if (container.innerHTML === '') {
     container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No hay datos de timeline disponibles.</p>';
   }
+  return ticks;
+}
+
+// Short label for the time axis (HH:MM if same day, else dd/MM HH:MM)
+function tsToAxisLabel(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 }
 
 // ── ANOMALY TABLE ──────────────────────────────────────────────
@@ -1325,27 +1955,52 @@ function renderSessionsTable() {
 }
 
 // ── BOOT EVENTS TABLE ─────────────────────────────────────────
-function renderBootEventsTable() {
-  const tbody = document.getElementById('boot-events-tbody');
+let bootSortCol = 'ts';
+let bootSortDir = 1;
+
+function renderBootEventsTable(bootEvents) {
+  const tbody = document.getElementById('boot-tbody');
   tbody.innerHTML = '';
 
-  if (bootEventData.length === 0) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No se detectaron eventos de arranque / boot.</td></tr>';
+  if (!bootEvents || bootEvents.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No se detectaron eventos de arranque/reset en este fichero.</td></tr>';
     return;
   }
 
-  bootEventData.forEach(ev => {
-    const rstDisplay = (ev.rstReason === undefined || ev.rstReason === null || ev.rstReason === '') ? '—' : escHtml(String(ev.rstReason));
-    const badgeCls   = ev.severity === 'grave' ? 'badge-danger' : 'badge-muted';
-    const badgeLabel = ev.severity === 'grave' ? 'Reset grave' : 'Pérdida de conectividad';
+  let data = [...bootEvents];
+  data.sort((a, b) => {
+    let va = a[bootSortCol] ?? '';
+    let vb = b[bootSortCol] ?? '';
+    if (bootSortCol === 'ts') { va = a.tsRaw || 0; vb = b.tsRaw || 0; }
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    return va < vb ? -bootSortDir : va > vb ? bootSortDir : 0;
+  });
+
+  data.forEach(e => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${escHtml(ev.ts)}</td>
-      <td>${escHtml(ev.chargerId)}</td>
-      <td>${rstDisplay}</td>
-      <td><span class="badge ${badgeCls}">${badgeLabel}</span></td>
+      <td>${escHtml(e.ts)}</td>
+      <td>${escHtml(e.charger)}</td>
+      <td>${escHtml(e.deviceId)}</td>
+      <td>${escHtml(e.cmd)}</td>
+      <td>${escHtml(String(e.rstReason))}</td>
+      <td><span class="badge ${e.badgeCls}">${escHtml(e.rstLabel)}</span></td>
+      <td><span class="badge ${e.badgeCls}">${escHtml(e.severity)}</span></td>
     `;
     tbody.appendChild(tr);
+  });
+
+  // Setup sorting (reassigning onclick replaces any previous handler)
+  document.querySelectorAll('#boot-table thead th[data-col]').forEach(th => {
+    th.onclick = () => {
+      const col = th.dataset.col;
+      if (bootSortCol === col) bootSortDir *= -1;
+      else { bootSortCol = col; bootSortDir = 1; }
+      document.querySelectorAll('#boot-table thead th .sort-icon').forEach(s => s.textContent = '↕');
+      th.querySelector('.sort-icon').textContent = bootSortDir === 1 ? '↑' : '↓';
+      renderBootEventsTable(bootEvents);
+    };
   });
 }
 
@@ -1487,8 +2142,12 @@ function resetUI() {
   document.getElementById('upload-zone').style.display = '';
   document.getElementById('progress-wrap').style.display = 'none';
   document.getElementById('file-input').value = '';
-  timelineChartInstances.forEach(c => c.destroy());
-  timelineChartInstances = [];
+  // Clear timeline HTML (no Chart.js instances to destroy)
+  document.getElementById('timeline-charts').innerHTML = '';
+  hideTimelineTip();
+  document.getElementById('timeline-charts').innerHTML = '';
+  const tt = document.getElementById('tl-tooltip');
+  if (tt) tt.style.display = 'none';
   anomalyData   = [];
   sessionData   = [];
   bootEventData = [];
